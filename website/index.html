@@ -339,8 +339,8 @@
     document.getElementById('osIcon').textContent = icon;
     document.getElementById('osLabel').textContent = label;
     const navCTA = document.getElementById('navCTA');
-    if (navCTA && os !== 'unknown') {
-      navCTA.textContent = 'Get the app (' + icon + ')';
+    if (navCTA) {
+      navCTA.textContent = 'Get the app';
     }
     if (os !== 'unknown') {
       document.getElementById('osNote').textContent = 'Detected ' + os + '. Click to download.';
