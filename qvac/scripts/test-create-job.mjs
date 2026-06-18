@@ -11,7 +11,8 @@ oUQDQgAEJ9jdXMqmAORbNuWY2Q74wmtsZ++Bvf696PpYOZepHqWCFmTFZDzW+JYO
 fZf7vQid4otudHLFJBWkiazcayJz9g==
 -----END EC PRIVATE KEY-----`;
 
-const CONTRACT_HASH = '94ed6b51b13f65a81e389b3a884a0ae1e1208dcc7e1aed809c88626f89b26f21';
+const CONTRACT_HASH = 'f813e6c77b9e4b60e0b78cebe2f7c412a1478e5a82f078413ac26c6f0521eb72';
+const ESCROW_ACCOUNT = '7e00d7dd02ea921ad3271811d6c0f8928f2e83d91c6f4a5b89048e23683cdf6c';
 
 function hexToBytes(hex) {
   const bytes = new Uint8Array(32);
@@ -25,13 +26,17 @@ async function main() {
   const accountHashHex = publicKey.accountHash().toHex();
   
   console.log('Account hash:', accountHashHex);
+  console.log('Escrow account:', ESCROW_ACCOUNT);
+  console.log('Contract hash:', CONTRACT_HASH);
   
   const argsMap = {
     consumer: CLValue.newCLByteArray(hexToBytes(accountHashHex)),
     provider: CLValue.newCLByteArray(hexToBytes('f227d4fb7c50164d363c5461ad0044ef8f3b8ad5ee7072b87384e101a2a4263d')),
     amount: CLValue.newCLUInt512('1000'),
     provider_fee_bps: CLValue.newCLUint64('100'),
-    order_id: CLValue.newCLString('test-job-4'),
+    order_id: CLValue.newCLString('test-job-5'),
+    escrow_account: CLValue.newCLByteArray(hexToBytes(ESCROW_ACCOUNT)),
+    contract_hash: CLValue.newCLByteArray(hexToBytes(CONTRACT_HASH)),
   };
   
   const args = Args.fromMap(argsMap);

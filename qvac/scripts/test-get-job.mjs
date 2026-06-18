@@ -11,7 +11,7 @@ oUQDQgAEJ9jdXMqmAORbNuWY2Q74wmtsZ++Bvf696PpYOZepHqWCFmTFZDzW+JYO
 fZf7vQid4otudHLFJBWkiazcayJz9g==
 -----END EC PRIVATE KEY-----`;
 
-const CONTRACT_HASH = '94ed6b51b13f65a81e389b3a884a0ae1e1208dcc7e1aed809c88626f89b26f21';
+const CONTRACT_HASH = 'f813e6c77b9e4b60e0b78cebe2f7c412a1478e5a82f078413ac26c6f0521eb72';
 
 async function main() {
   const privateKey = PrivateKey.fromPem(PEM, KeyAlgorithm.SECP256K1);

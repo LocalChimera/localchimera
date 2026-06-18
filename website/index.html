@@ -24,21 +24,23 @@
     @keyframes blink{0%,100%{opacity:1}50%{opacity:0}}
 
     header{position:fixed;inset:0 0 auto;z-index:50;background:rgba(3,3,8,.88);backdrop-filter:blur(20px);border-bottom:1px solid rgba(255,255,255,.05)}
-    header .container{height:60px;display:flex;align-items:center;justify-content:space-between}
-    .logo{display:flex;align-items:center;gap:10px;font-weight:700;font-size:16px;letter-spacing:.02em;color:#e8e2d8}
-    .logo-icon{width:28px;height:28px;border-radius:8px;display:flex;align-items:center;justify-content:center;overflow:hidden}
-    .logo-icon img{width:100%;height:100%;object-fit:cover;border-radius:8px}
+    header .container{height:72px;display:flex;align-items:center;justify-content:space-between}
+    .logo{display:flex;align-items:center;gap:12px;font-weight:800;font-size:20px;letter-spacing:.02em;color:#e8e2d8}
+    .logo-icon{width:40px;height:40px;border-radius:10px;display:flex;align-items:center;justify-content:center;overflow:hidden}
+    .logo-icon img{width:100%;height:100%;object-fit:cover;border-radius:10px}
     nav{display:flex;align-items:center;gap:28px}
     nav a{font-size:14px;color:#7a7468;transition:.2s}
     nav a:hover{color:#e8e2d8}
     .nav-cta{padding:8px 18px;border-radius:8px;background:rgba(0,229,255,.12);color:#00e5ff;font-size:13px;font-weight:600;transition:.2s}
     .nav-cta:hover{background:rgba(0,229,255,.2)}
 
-    .hero{min-height:90vh;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:140px 24px 80px}
+    .hero{min-height:90vh;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:120px 24px 80px}
+    .hero-banner{width:100%;max-width:900px;margin:0 auto 32px;border-radius:12px;overflow:hidden;opacity:.7}
+    .hero-banner img{width:100%;height:auto;display:block}
     .hero-tag{display:inline-flex;align-items:center;gap:8px;padding:8px 18px;border-radius:20px;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.02);font-size:13px;color:#7a7468;margin-bottom:28px}
     .hero-tag .dot{width:6px;height:6px;border-radius:50%;background:#4ade80;box-shadow:0 0 8px #4ade80;animation:pulse 2s infinite}
-    .hero h1{font-size:clamp(36px,6vw,64px);font-weight:800;line-height:1.05;letter-spacing:-.02em;margin-bottom:20px}
-    .hero p{font-size:17px;color:#7a7468;max-width:520px;margin:0 auto 32px;line-height:1.7}
+    .hero h1{font-size:clamp(44px,7vw,80px);font-weight:800;line-height:1.05;letter-spacing:-.03em;margin-bottom:20px}
+    .hero p{font-size:18px;color:#7a7468;max-width:560px;margin:0 auto 32px;line-height:1.7}
     .hero-cta{padding:14px 32px;border-radius:12px;background:linear-gradient(135deg,#00e5ff,#a855f7);color:#000;font-size:15px;font-weight:700;transition:.2s;cursor:pointer;border:none}
     .hero-cta:hover{transform:translateY(-2px);box-shadow:0 12px 32px rgba(0,229,255,.25)}
 
@@ -142,6 +144,7 @@
 </header>
 
 <section class="hero">
+  <div class="hero-banner"><img src="banner2.png" alt="Chimera"></div>
   <div class="hero-tag">
     <span class="dot"></span>
     Open source · Permissionless
@@ -357,7 +360,6 @@
 
 <footer>
   <div class="container">
-    <div style="margin-bottom:20px"><img src="banner2.png" alt="Chimera" style="max-width:100%;height:auto;border-radius:8px;opacity:.6"></div>
     <p>Chimera is open source under the MIT license.</p>
     <p style="margin-top:8px"><a href="https://github.com/TerexitariusStomp/qvac-chimera" target="_blank" rel="noopener">GitHub</a> · <a href="https://x.com/LocalChimera" target="_blank" rel="noopener">Twitter</a></p>
   </div>

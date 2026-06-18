@@ -70,7 +70,7 @@
   .ai-btn{background:#c9a96e;color:#0e0d0b;border:none;padding:8px 14px;border-radius:5px;font-size:12px;font-weight:600;font-family:ui-monospace,monospace;transition:.15s;cursor:default;opacity:.7}
   .ai-hint{font-size:11px;color:#4a4540;line-height:1.5;margin-top:4px}
   .ai-tabs{display:flex;gap:3;border-bottom:1px solid rgba(255,255,255,.06);padding-bottom:8px}
-  .ai-tab{padding:4px 8px;border-radius:4px;font-size:10px;white-space:nowrap;flex-shrink:0;font-family:ui-monospace,monospace;background:#161410;color:#7a7468;border:1px solid rgba(255,255,255,.07)}
+  .ai-tab{padding:4px 8px;border-radius:4px;font-size:10px;white-space:nowrap;flex-shrink:0;font-family:ui-monospace,monospace;background:#161410;color:#7a7468;border:1px solid rgba(255,255,255,.07);cursor:pointer}
   .ai-tab.active{background:#0e0d0b;color:#c9a96e;border:1px solid rgba(255,255,255,.1)}
 
   .miner-panel{padding:10px 12px;border-top:1px solid rgba(255,255,255,.06);border-bottom:1px solid rgba(255,255,255,.06)}
@@ -95,8 +95,8 @@
   <!-- Sidebar -->
   <aside class="sidebar">
     <div class="sidebar-header">
-      <div class="logo-icon" style="background:none;overflow:hidden"><img src="chimeralogo-header.png" alt="Chimera" style="width:28px;height:28px;border-radius:8px;object-fit:cover"></div>
-      <div class="logo-text">Chimera</div>
+      <div class="logo-icon" style="background:none;overflow:hidden"><img src="chimeralogo-header.png" alt="Chimera" style="width:40px;height:40px;border-radius:10px;object-fit:cover"></div>
+      <div class="logo-text" style="font-size:20px;font-weight:800">Chimera</div>
     </div>
     <div class="search-box">
       <input class="search-input" placeholder="Search wiki..." readonly>
@@ -221,25 +221,94 @@ console.log("Hello, wiki!");</code></pre>
     </div>
     <div class="ai-body">
       <div class="ai-tabs">
-        <span class="ai-tab active">Generate</span>
-        <span class="ai-tab">Edit</span>
-        <span class="ai-tab">Draft</span>
-        <span class="ai-tab">Analyze</span>
-        <span class="ai-tab">Auto</span>
+        <span class="ai-tab active" onclick="switchTab(this,'gen')">Generate</span>
+        <span class="ai-tab" onclick="switchTab(this,'edit')">Edit</span>
+        <span class="ai-tab" onclick="switchTab(this,'draft')">Draft</span>
+        <span class="ai-tab" onclick="switchTab(this,'analyze')">Analyze</span>
+        <span class="ai-tab" onclick="switchTab(this,'auto')">Auto</span>
       </div>
-      <div class="ai-field">
-        <div class="ai-label">Prompt</div>
-        <textarea class="ai-textarea" placeholder="What should I write about?" readonly></textarea>
+
+      <div id="tab-gen">
+        <div class="ai-field">
+          <div class="ai-label">Prompt</div>
+          <textarea class="ai-textarea" placeholder="What should I write about?" readonly></textarea>
+        </div>
+        <div class="ai-field">
+          <div class="ai-label">Title (optional)</div>
+          <input class="ai-input" placeholder="Page title" readonly>
+        </div>
+        <div class="ai-btn">Generate</div>
       </div>
-      <div class="ai-field">
-        <div class="ai-label">Title (optional)</div>
-        <input class="ai-input" placeholder="Page title" readonly>
+
+      <div id="tab-edit" style="display:none">
+        <div class="ai-field">
+          <div class="ai-label">Selected text</div>
+          <textarea class="ai-textarea" placeholder="Highlight text in the editor to transform it..." readonly></textarea>
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px">
+          <span class="ai-btn" style="flex:1;min-width:80px;text-align:center">Shorten</span>
+          <span class="ai-btn" style="flex:1;min-width:80px;text-align:center">Expand</span>
+          <span class="ai-btn" style="flex:1;min-width:80px;text-align:center">Fix</span>
+          <span class="ai-btn" style="flex:1;min-width:80px;text-align:center">Formal</span>
+          <span class="ai-btn" style="flex:1;min-width:80px;text-align:center">Continue</span>
+          <span class="ai-btn" style="flex:1;min-width:80px;text-align:center">Critique</span>
+        </div>
       </div>
-      <div class="ai-btn">Generate</div>
+
+      <div id="tab-draft" style="display:none">
+        <div class="ai-field">
+          <div class="ai-label">Outline</div>
+          <textarea class="ai-textarea" placeholder="Paste an outline or bullet list..." readonly></textarea>
+        </div>
+        <div class="ai-field">
+          <div class="ai-label">Tone</div>
+          <select class="ai-input" disabled style="background:#161410;color:#7a7468"><option>Academic</option><option>Casual</option><option>Persuasive</option><option>Technical</option></select>
+        </div>
+        <div class="ai-btn">Draft from outline</div>
+      </div>
+
+      <div id="tab-analyze" style="display:none">
+        <div class="ai-field">
+          <div class="ai-label">Text to analyze</div>
+          <textarea class="ai-textarea" placeholder="Paste text to analyze structure, sentiment, and readability..." readonly></textarea>
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px">
+          <span class="ai-btn" style="flex:1;min-width:100px;text-align:center">Structure</span>
+          <span class="ai-btn" style="flex:1;min-width:100px;text-align:center">Sentiment</span>
+          <span class="ai-btn" style="flex:1;min-width:100px;text-align:center">Readability</span>
+        </div>
+      </div>
+
+      <div id="tab-auto" style="display:none">
+        <div class="ai-field">
+          <div class="ai-label">Auto mode</div>
+          <div style="padding:10px;background:#161410;border:1px solid rgba(255,255,255,.07);border-radius:6px;font-size:12px;color:#7a7468;line-height:1.5">
+            AI monitors your writing and suggests completions in real-time. Toggle to enable.
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;margin-top:8px">
+          <span style="font-size:13px;color:#b0a898">Auto-suggest</span>
+          <span style="margin-left:auto;padding:4px 12px;background:#7a7468;border-radius:10px;font-size:11px;color:#0e0d0b;font-weight:700">OFF</span>
+        </div>
+        <div style="margin-top:12px;padding:8px;background:#450a0a;border:1px solid #b91c1c;border-radius:6px;font-size:11px;color:#fca5a5">
+          ⚠️ Auto mode runs inference on every keystroke. Battery usage will increase.
+        </div>
+      </div>
+
       <div class="ai-hint">AI runs locally on your device via QVAK. No data leaves your machine.</div>
     </div>
   </aside>
 </div>
+
+<script>
+function switchTab(el, id) {
+  document.querySelectorAll('.ai-tab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  ['gen','edit','draft','analyze','auto'].forEach(k => {
+    document.getElementById('tab-'+k).style.display = k === id ? 'block' : 'none';
+  });
+}
+</script>
 
 </body>
 </html>
