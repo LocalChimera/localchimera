@@ -1,4 +1,4 @@
-import { readFileSync } from 'fs';
+import { readFileSync, writeFileSync } from 'fs';
 import pkg from 'casper-js-sdk';
 const sdk = pkg;
 const { PrivateKey, KeyAlgorithm, CLValue, Args, DeployHeader, ExecutableDeployItem, Deploy } = sdk;
@@ -6,6 +6,7 @@ const { PrivateKey, KeyAlgorithm, CLValue, Args, DeployHeader, ExecutableDeployI
 const WASM_PATH = '/tmp/escrow_vault_fixed2.wasm';
 const RPC_URL = 'http://localhost:7778/rpc';
 const CHAIN_NAME = 'casper-test';
+const ESCROW_PEM_PATH = '/tmp/escrow-account.pem';
 
 const PEM = `-----BEGIN EC PRIVATE KEY-----
 MHQCAQEEIA6Hjhvhzz4rc5cKlR3fOtI42H8E1VOqpdpe6P/Nc7qvoAcGBSuBBAAK
@@ -31,8 +32,22 @@ async function deploy() {
   const deployerAccount = publicKey.accountHash().toHex();
   const userAccount = 'e39ac4daa9a8fe88d9f074cecfd537d18eb0fbf1196c1b4dd85749bcc50723e9';
 
+  // Generate or load escrow account
+  let escrowKey;
+  try {
+    escrowKey = PrivateKey.fromPem(readFileSync(ESCROW_PEM_PATH, 'utf8'), KeyAlgorithm.SECP256K1);
+    console.log('Loaded existing escrow account:', escrowKey.publicKey.accountHash().toHex());
+  } catch {
+    escrowKey = PrivateKey.generate(KeyAlgorithm.SECP256K1);
+    writeFileSync(ESCROW_PEM_PATH, escrowKey.toPem());
+    console.log('Generated new escrow account:', escrowKey.publicKey.accountHash().toHex());
+    console.log('Saved escrow PEM to', ESCROW_PEM_PATH);
+  }
+  const escrowAccount = escrowKey.publicKey.accountHash().toHex();
+
   console.log('Deployer account:', deployerAccount);
   console.log('Contract owner will be:', userAccount);
+  console.log('Escrow account will be:', escrowAccount);
 
   const wasmBytes = readFileSync(WASM_PATH);
   console.log('WASM size:', wasmBytes.length, 'bytes');
@@ -42,6 +57,7 @@ async function deploy() {
     reputation: CLValue.newCLByteArray(accountHashToBytes(CONTRACTS.reputation)),
     owner: CLValue.newCLByteArray(accountHashToBytes(userAccount)),
     protocol_fee_recipient: CLValue.newCLByteArray(accountHashToBytes(userAccount)),
+    escrow_account: CLValue.newCLByteArray(accountHashToBytes(escrowAccount)),
   });
 
   const header = DeployHeader.default();
