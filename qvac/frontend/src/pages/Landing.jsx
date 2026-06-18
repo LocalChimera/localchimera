@@ -3,7 +3,7 @@ import {
   Zap, Cpu, Network, Database, Code2, Coins, Layers,
   ChevronRight, ArrowRight, Github,
   Terminal, Globe, Shield, Activity, Server,
-  PlugZap, Sparkles, Wallet, ServerCrash, BookOpen
+  PlugZap, Sparkles, Wallet, ServerCrash, BookOpen, Download
 } from 'lucide-react'
 import AIWriterExample from './AIWriterExample'
 
@@ -140,6 +140,55 @@ export default function Landing({ onNavigateToDashboard, onNavigateToMiner, onNa
     return () => window.removeEventListener('scroll', fn)
   }, [])
 
+  const downloadFile = (content, filename, mimeType = 'text/plain') => {
+    const blob = new Blob([content], { type: mimeType });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const detectOS = () => {
+    const ua = navigator.userAgent;
+    if (/Android/i.test(ua)) return 'android';
+    if (/iPhone|iPad|iPod/i.test(ua)) return 'ios';
+    if (ua.indexOf('Win') !== -1) return 'windows';
+    if (ua.indexOf('Mac') !== -1) return 'mac';
+    return 'linux';
+  };
+
+  const handleDownload = () => {
+    const address = localStorage.getItem('chimeraEvmAddress') || '0x0000000000000000000000000000000000000000';
+    const os = detectOS();
+    const repo = 'https://github.com/TerexitariusStomp/qvac-chimera.git';
+    const folder = 'qvac-chimera';
+
+    if (os === 'android') {
+      const content = `#!/bin/bash\necho "========================================"\necho "  Chimera - Android Setup"\necho "========================================"\necho\necho "Install Termux from F-Droid or Play Store, then run:"\necho\necho "  pkg update"\necho "  pkg install git nodejs"\necho "  git clone ${repo}"\necho "  cd qvac-chimera/qvac"\necho "  npm install"\necho "  cd frontend && npm install && npm run build && cd .."\necho "  export MACHINE_OWNER_EVM=${address}"\necho "  node src/index.js"\necho\necho "Then open http://localhost:3002 in your browser."\necho "Start/stop mining inside the app sidebar."\n`;
+      downloadFile(content, 'install-chimera-android.sh', 'text/plain');
+      return;
+    }
+    if (os === 'ios') {
+      const content = `Chimera - iOS Setup\n================================\n\n1. Install a-Shell from the App Store (free terminal app).\n\n2. Inside a-Shell, run:\n\n   git clone ${repo}\n   cd qvac-chimera/qvac\n   npm install\n   cd frontend && npm install && npm run build && cd ..\n   export MACHINE_OWNER_EVM=${address}\n   node src/index.js\n\n3. Open Safari to http://localhost:3002\n\nStart/stop mining inside the app sidebar.\n`;
+      downloadFile(content, 'install-chimera-ios.txt', 'text/plain');
+      return;
+    }
+
+    let file, content;
+    if (os === 'windows') {
+      file = 'install-chimera.bat';
+      content = `@echo off\r\necho ======================================\r\necho   Chimera - Setup\r\necho ======================================\r\necho.\r\necho This script downloads and runs Chimera on your machine.\r\necho Start/stop mining is handled inside the app.\r\necho.\r\necho Checking Node.js...\r\nnode --version >nul 2>&1\r\nif errorlevel 1 (\r\n  echo Node.js not found. Please install from https://nodejs.org/\r\n  pause\r\n  exit /b 1\r\n)\r\necho.\r\necho Downloading Chimera...\r\nif not exist ${folder} (\r\n  git clone ${repo} || (echo Git not found ^& pause ^& exit /b 1)\r\n) else (\r\n  echo Already downloaded, updating...\r\n  cd ${folder}\r\n  git pull\r\n  cd ..\r\n)\r\ncd ${folder}\\qvac\r\necho Installing dependencies...\r\nnpm install\r\ncd frontend\r\nnpm install\r\nnpm run build\r\ncd ..\r\necho Setting EVM address...\r\nset MACHINE_OWNER_EVM=${address}\r\nset APP_ID=protocol-default\r\necho.\r\necho ======================================\r\necho   Ready! Opening http://localhost:3002\r\necho   Start/stop miner inside the app sidebar.\r\necho ======================================\r\nstart http://localhost:3002\r\nnode src/index.js\r\n`;
+    } else {
+      file = 'install-chimera.sh';
+      content = `#!/bin/bash\necho "========================================"\necho "  Chimera - Setup"\necho "========================================"\necho\necho "This script downloads and runs Chimera on your machine."\necho "Start/stop mining is handled inside the app."\necho\necho "Checking Node.js..."\nif ! command -v node &> /dev/null; then\n  echo "Node.js not found. Install from https://nodejs.org/"\n  exit 1\nfi\nnode --version\necho\necho "Downloading Chimera..."\nif [ ! -d "${folder}" ]; then\n  git clone ${repo} || { echo "Git not found"; exit 1; }\nelse\n  echo "Already downloaded, updating..."\n  cd ${folder}\n  git pull\n  cd ..\nfi\ncd ${folder}/qvac\necho "Installing dependencies..."\nnpm install\ncd frontend\nnpm install\nnpm run build\ncd ..\necho "Setting EVM address..."\nexport MACHINE_OWNER_EVM=${address}\nexport APP_ID=protocol-default\necho\necho "========================================"\necho "  Ready! Opening http://localhost:3002"\necho "  Start/stop miner inside the app sidebar."\necho "========================================"\nopen http://localhost:3002 2>/dev/null || xdg-open http://localhost:3002 2>/dev/null || echo "Open http://localhost:3002"\nnode src/index.js\n`;
+    }
+    downloadFile(content, file, 'text/plain');
+  };
+
   return (
     <div className="relative min-h-screen" style={{ background: '#04040a' }}>
       <GridOverlay />
@@ -222,16 +271,14 @@ export default function Landing({ onNavigateToDashboard, onNavigateToMiner, onNa
 
         <FadeUp delay={350}>
           <div className="flex items-center gap-4 flex-wrap justify-center mb-20">
-            <a
-              href="https://github.com/TerexitariusStomp/qvac-chimera"
-              target="_blank"
-              rel="noopener noreferrer"
+            <button
+              onClick={handleDownload}
               className="group flex items-center gap-2 px-6 py-3 rounded-xl bg-gradient-to-r from-cyan-400 to-cyan-300 text-black text-sm font-semibold hover:from-cyan-300 hover:to-cyan-200 transition-all shadow-[0_0_24px_#00e5ff28] hover:shadow-[0_0_36px_#00e5ff45]"
             >
-              <Github size={14} />
-              Download on GitHub
+              <Download size={14} />
+              Download
               <ArrowRight size={14} className="group-hover:translate-x-0.5 transition-transform" />
-            </a>
+            </button>
           </div>
         </FadeUp>
 
