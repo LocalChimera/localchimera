@@ -726,7 +726,7 @@ export default function WikiPage({ onBack }) {
       {/* ─── Right AI Panel ─── */}
       <aside style={aiOpen ? s.aiPanel : s.aiPanelCollapsed}>
         <div style={s.aiHeader} onClick={() => setAiOpen(!aiOpen)}>
-          <span>🤖 AI Writer</span>
+          <span>{aiOpen ? '🤖 AI Writer' : '🤖'}</span>
           <span style={s.aiToggle}>{aiOpen ? '›' : '‹'}</span>
         </div>
         {aiOpen && (
