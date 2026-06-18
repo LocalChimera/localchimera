@@ -75,6 +75,26 @@
     .auto-detect-btn .os-icon{width:20px;height:20px;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700}
     .auto-detect-note{margin-top:10px;font-size:12px;color:#7a7468}
 
+    .mining-dashboard{max-width:480px;margin:0 auto;padding:28px;border-radius:16px;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.015)}
+    .mining-input{width:100%;padding:10px 14px;border-radius:8px;border:1px solid rgba(255,255,255,.1);background:#0a0a12;color:#e8e2d8;font-size:13px;font-family:ui-monospace,SFMono-Regular,monospace;outline:none;transition:.2s}
+    .mining-input:focus{border-color:rgba(0,229,255,.3)}
+    .mining-input::placeholder{color:#4a4540}
+    .mining-row{display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.04);font-size:13px}
+    .mining-row:last-child{border-bottom:none}
+    .mining-label{color:#7a7468}
+    .mining-value{color:#e8e2d8;font-weight:600;font-family:ui-monospace,monospace}
+    .mining-value.green{color:#4ade80}
+    .mining-controls{display:flex;gap:8px;margin-top:16px}
+    .mining-btn{flex:1;padding:10px 0;border-radius:8px;border:none;font-size:13px;font-weight:600;cursor:pointer;transition:.2s}
+    .mining-btn.start{background:linear-gradient(135deg,#00e5ff,#a855f7);color:#000}
+    .mining-btn.stop{background:#450a0a;color:#fca5a5}
+    .mining-btn:disabled{opacity:.4;cursor:not-allowed}
+    .mining-consent{display:flex;align-items:center;gap:10px;padding:12px 16px;border-radius:10px;background:rgba(0,229,255,.05);border:1px solid rgba(0,229,255,.15);margin-bottom:16px;font-size:13px;line-height:1.6}
+    .mining-consent input{width:18px;height:18px;accent-color:#00e5ff;flex-shrink:0}
+    .mining-status-badge{display:inline-flex;align-items:center;gap:6px;padding:4px 12px;border-radius:20px;font-size:11px;font-weight:600}
+    .mining-status-badge.running{background:#14532d;color:#86efac}
+    .mining-status-badge.stopped{background:#450a0a;color:#fca5a5}
+
     .how-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:24px;margin-top:40px}
     .how-step{text-align:center;padding:24px}
     .how-num{width:36px;height:36px;border-radius:10px;background:linear-gradient(135deg,#00e5ff,#a855f7);color:#000;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:800;margin:0 auto 16px}
@@ -189,6 +209,57 @@
         <h3 style="color:#7a7468">Your app here</h3>
         <p style="color:#5a5448">Build on the QVAC SDK. Ship an app that runs local inference and mines tasks. Get in touch to showcase your project.</p>
         <a href="https://github.com/TerexitariusStomp/qvac-chimera" target="_blank" rel="noopener" style="display:inline-block;margin-top:12px;font-size:13px;color:#7a7468">Read the SDK docs →</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section" id="mining" style="background:rgba(255,255,255,.01);border-top:1px solid rgba(255,255,255,.06)">
+  <div class="container">
+    <div class="section-header">
+      <div class="section-label">Mining</div>
+      <h2>Your node. Your earnings.</h2>
+      <p>Enter your EVM address. Give consent. Start earning.</p>
+    </div>
+    <div class="mining-dashboard">
+      <div style="font-size:13px;color:#7a7468;margin-bottom:12px">Payout address (EVM)</div>
+      <input type="text" id="miningWallet" class="mining-input" placeholder="0x..." maxlength="42" oninput="validateWallet(this)">
+      <div id="walletError" style="font-size:11px;color:#fca5a5;margin-top:4px;min-height:16px"></div>
+
+      <div class="mining-consent" id="consentBox">
+        <input type="checkbox" id="miningConsent" onchange="toggleConsent()">
+        <label for="miningConsent" style="cursor:pointer">I consent to running local AI inference tasks on my device. Mining rewards are swept weekly into the protocol multisig and distributed monthly to this EVM address.</label>
+      </div>
+
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+        <span id="miningStatusBadge" class="mining-status-badge stopped">○ Stopped</span>
+        <span style="font-size:11px;color:#4a4540">Backend: localhost:3002</span>
+      </div>
+
+      <div class="mining-row">
+        <span class="mining-label">Cortensor</span>
+        <span class="mining-value" id="status-cortensor">—</span>
+      </div>
+      <div class="mining-row">
+        <span class="mining-label">Chutes</span>
+        <span class="mining-value" id="status-chutes">—</span>
+      </div>
+      <div class="mining-row">
+        <span class="mining-label">Fortytwo</span>
+        <span class="mining-value" id="status-fortytwo">—</span>
+      </div>
+      <div class="mining-row">
+        <span class="mining-label">Earnidle</span>
+        <span class="mining-value" id="status-earnidle">—</span>
+      </div>
+      <div class="mining-row">
+        <span class="mining-label">Routstr</span>
+        <span class="mining-value" id="status-routstr">—</span>
+      </div>
+
+      <div class="mining-controls">
+        <button class="mining-btn start" id="btnStart" onclick="miningStart()" disabled>▶ Start</button>
+        <button class="mining-btn stop" id="btnStop" onclick="miningStop()" disabled>⏹ Stop</button>
       </div>
     </div>
   </div>
@@ -390,6 +461,94 @@
       window.open(fallback, '_blank');
     }
   }
+
+  // ─── Mining Dashboard ───
+  const API = 'http://localhost:3002/api';
+  let miningPoll = null;
+
+  function validateWallet(el) {
+    const v = el.value.trim();
+    const err = document.getElementById('walletError');
+    if (!v) { err.textContent = ''; toggleConsent(); return; }
+    if (!/^0x[a-fA-F0-9]{40}$/.test(v)) {
+      err.textContent = 'Invalid EVM address';
+    } else {
+      err.textContent = '';
+      localStorage.setItem('chimeraEvmAddress', v);
+    }
+    toggleConsent();
+  }
+
+  function toggleConsent() {
+    const wallet = document.getElementById('miningWallet').value.trim();
+    const checked = document.getElementById('miningConsent').checked;
+    const valid = /^0x[a-fA-F0-9]{40}$/.test(wallet);
+    document.getElementById('btnStart').disabled = !(valid && checked);
+  }
+
+  function setMiningStatus(running, miners) {
+    const badge = document.getElementById('miningStatusBadge');
+    if (running) {
+      badge.className = 'mining-status-badge running';
+      badge.textContent = '● Running';
+    } else {
+      badge.className = 'mining-status-badge stopped';
+      badge.textContent = '○ Stopped';
+    }
+    document.getElementById('btnStart').disabled = running || !document.getElementById('miningConsent').checked || !/^0x[a-fA-F0-9]{40}$/.test(document.getElementById('miningWallet').value.trim());
+    document.getElementById('btnStop').disabled = !running;
+    const names = ['cortensor','chutes','fortytwo','earnidle','routstr'];
+    for (const n of names) {
+      const el = document.getElementById('status-' + n);
+      if (miners && miners[n]) {
+        el.textContent = miners[n].running ? 'on' : 'off';
+        el.className = 'mining-value ' + (miners[n].running ? 'green' : '');
+      } else {
+        el.textContent = '—';
+        el.className = 'mining-value';
+      }
+    }
+  }
+
+  async function miningStart() {
+    const wallet = document.getElementById('miningWallet').value.trim();
+    try {
+      const res = await fetch(`${API}/start`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ machineOwnerEVM: wallet })
+      });
+      const text = await res.text();
+      const json = text ? JSON.parse(text) : {};
+      if (json.success) setMiningStatus(true, null);
+    } catch (e) {}
+  }
+
+  async function miningStop() {
+    try {
+      const res = await fetch(`${API}/stop`, { method: 'POST' });
+      const text = await res.text();
+      const json = text ? JSON.parse(text) : {};
+      if (json.success) setMiningStatus(false, null);
+    } catch (e) {}
+  }
+
+  async function pollMiningStatus() {
+    try {
+      const res = await fetch(`${API}/status`);
+      const json = await res.json();
+      if (json.success && json.data) {
+        setMiningStatus(json.data.running, json.data.mining?.minerStatus);
+      }
+    } catch (e) {}
+  }
+
+  (function initMining() {
+    const saved = localStorage.getItem('chimeraEvmAddress');
+    if (saved) { document.getElementById('miningWallet').value = saved; validateWallet(document.getElementById('miningWallet')); }
+    pollMiningStatus();
+    miningPoll = setInterval(pollMiningStatus, 5000);
+  })();
 </script>
 
 </body>

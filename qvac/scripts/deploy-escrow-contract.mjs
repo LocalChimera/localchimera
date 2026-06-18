@@ -3,7 +3,7 @@ import pkg from 'casper-js-sdk';
 const sdk = pkg;
 const { PrivateKey, KeyAlgorithm, CLValue, Args, DeployHeader, ExecutableDeployItem, Deploy } = sdk;
 
-const WASM_PATH = '/tmp/escrow_vault_noopt.wasm';
+const WASM_PATH = '/tmp/escrow_vault_fixed2.wasm';
 const RPC_URL = 'http://localhost:7778/rpc';
 const CHAIN_NAME = 'casper-test';
 

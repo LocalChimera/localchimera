@@ -3,7 +3,8 @@ import MiningPanel from './MiningPanel';
 
 /**
  * Example app integrating the Chimera SDK.
- * Replace the integratorWallet with your own EVM address.
+ * Apps only show consent + start/stop.
+ * Wallet and earnings are managed on the Chimera dashboard.
  */
 export default function App() {
   return (
@@ -15,10 +16,7 @@ export default function App() {
       justifyContent: 'center',
       padding: 24
     }}>
-      <MiningPanel
-        integratorWallet="0xYourEvmWalletAddressHere"
-        revenueSplit={{ integrator: 0.30, machineOwner: 0.70 }}
-      />
+      <MiningPanel />
     </div>
   );
 }

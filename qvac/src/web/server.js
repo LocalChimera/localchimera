@@ -597,14 +597,18 @@ print(result.text_content)
     const body = await parseBody(req);
     if (!this.nodeManager.isRunning) await this.nodeManager.start();
     if (this.nodeManager.minerManager) {
-      if (body.wallet) this.nodeManager.minerManager.evmAddress = body.wallet;
-      if (body.integratorWallet) {
-        this.nodeManager.minerManager.integratorWallet = body.integratorWallet;
-        this.logger.info(`[integrator] Wallet set: ${body.integratorWallet}`);
+      // User EVM addresses for monthly distribution
+      if (body.machineOwnerEVM) {
+        this.nodeManager.minerManager.machineOwnerEVM = body.machineOwnerEVM;
+        this.logger.info(`[miner] Machine owner EVM: ${body.machineOwnerEVM}`);
+      }
+      if (body.appDeveloperEVM) {
+        this.nodeManager.minerManager.appDeveloperEVM = body.appDeveloperEVM;
+        this.logger.info(`[miner] App developer EVM: ${body.appDeveloperEVM}`);
       }
       if (body.revenueSplit) {
         this.nodeManager.minerManager.revenueSplit = body.revenueSplit;
-        this.logger.info(`[integrator] Revenue split — machine owner: ${(body.revenueSplit.machineOwner * 100).toFixed(0)}%, integrator: ${(body.revenueSplit.integrator * 100).toFixed(0)}%`);
+        this.logger.info(`[miner] Revenue split — machine owner: ${(body.revenueSplit.machineOwner * 100).toFixed(0)}%, app developer: ${(body.revenueSplit.appDeveloper * 100).toFixed(0)}%`);
       }
     }
     ok(res, { message: 'Mining started', running: true });

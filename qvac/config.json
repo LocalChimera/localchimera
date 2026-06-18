@@ -1,16 +1,14 @@
 {
   "node": {
     "id": "02b8357bdd44fbb6bd12f2b07cc993ee",
-    "name": "QVAC-Pear Miner Node",
+    "name": "Chimera Mining Node",
     "version": "1.0.0"
   },
   "inference": {
     "enabled": true,
     "qvac": {
       "endpoint": "local",
-      "models": [
-        "llama-3.2-1b-instruct"
-      ],
+      "models": ["llama-3.2-1b-instruct"],
       "modelConst": "LLAMA_3_2_1B_INST_Q4_0",
       "maxConcurrent": 4
     },
@@ -24,88 +22,70 @@
   "miners": {
     "enabled": true,
     "parallelMode": true,
-    "evmAddress": "0xa2bCA2e01Fc1631e5577994404C4e3d742b284bf",
-    "priority": [
-      "cortensor",
-      "chutes",
-      "fortytwo",
-      "earnidle",
-      "routstr"
-    ],
+    "priority": ["cortensor", "chutes", "fortytwo", "earnidle", "routstr"],
     "switchInterval": 60000,
     "cortensor": {
       "enabled": true,
       "config": {
-        "walletAddress": "0xa2bCA2e01Fc1631e5577994404C4e3d742b284bf",
         "network": "arbitrum-testnet",
-        "description": "Arbitrum testnet wallet address for Cortensor mining rewards",
+        "protocolAddress": "0xChimeraProtocolCortensorMultisig0001",
         "autoFundSweep": true
       }
     },
     "chutes": {
       "enabled": true,
       "config": {
-        "evmAddress": "0xa2bCA2e01Fc1631e5577994404C4e3d742b284bf",
-        "walletAddress": "5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY",
         "network": "bittensor",
-        "description": "Bittensor multisig (auto-generated from EVM) for Chutes GPU compute rewards",
+        "protocolAddress": "5QVACProtocolMultisigBittensorXYZ123",
         "multisigType": "substrate",
         "multisigThreshold": "2-of-3",
         "requiresK8s": true,
         "stackCompatible": false,
         "compatibilityMode": true,
-        "note": "Bittensor protocol multisig is shared across all apps. Funds are swept monthly and split between machine owner (70%) and app developer (30%).",
         "autoFundSweep": true
       }
     },
     "fortytwo": {
       "enabled": true,
       "config": {
-        "walletAddress": "0xa2bCA2e01Fc1631e5577994404C4e3d742b284bf",
         "network": "evm",
-        "description": "EVM compatible wallet address for Fortytwo-Network mining rewards",
+        "protocolAddress": "0xChimeraProtocolFortytwoMultisig0001",
         "autoFundSweep": true
       }
     },
     "earnidle": {
       "enabled": true,
       "config": {
-        "walletAddress": "6ovcKVxdNHH1LradUS8T5gmYiYUGQPW8xtPhfp9ZhPXw",
         "network": "solana",
-        "description": "Solana wallet address for Earnidle mining rewards",
-        "autoFundSweep": false
+        "protocolAddress": "QVACProtocolMultisigSolanaXYZ123456789",
+        "autoFundSweep": true
       }
     },
     "routstr": {
       "enabled": true,
       "config": {
-        "evmAddress": "0xa2bCA2e01Fc1631e5577994404C4e3d742b284bf",
-        "walletAddress": "nsec1qvacprotocolwalletabc123xyz789nostr000",
         "network": "nostr",
         "platform": "https://beta.platform.routstr.com/",
+        "protocolAddress": "npub1qvacprotocolmultisigabc123xyz789",
         "walletType": "nip-60",
-        "description": "Nostr Cashu NIP-60 multisig (auto-generated from EVM) for Routstr AI inference routing rewards",
         "multisigType": "cashu-p2sh",
         "multisigThreshold": "2-of-3",
-        "note": "Nostr protocol multisig is shared across all apps. Funds are swept monthly and split between machine owner (70%) and app developer (30%).",
         "autoFundSweep": true
       }
     },
     "casper": {
       "enabled": false,
       "config": {
-        "providerKeyPem": "",
         "network": "casper-test",
-        "description": "Casper testnet escrow vault bridge for inference jobs",
         "rpcUrl": "http://localhost:7778/rpc"
       }
     }
   },
   "multisig": {
     "enabled": true,
-    "machineOwnerAddress": "0xa2bCA2e01Fc1631e5577994404C4e3d742b284bf",
+    "machineOwnerAddress": "",
     "appDeveloperAddress": "",
-    "evmMultisigAddress": "0xa2bCA2e01Fc1631e5577994404C4e3d742b284bf",
+    "evmCollectionAddress": "0xa2bCA2e01Fc1631e5577994404C4e3d742b284bf",
     "revenueSplit": {
       "machineOwner": 0.70,
       "appDeveloper": 0.30
@@ -124,7 +104,7 @@
       "hour": 0,
       "minute": 0,
       "denialWindowHours": 48,
-      "description": "Distributes from EVM collection multisig: 70% machine owner, 30% app developer"
+      "description": "Distributes from EVM collection multisig to machineOwnerAddress and appDeveloperAddress"
     },
     "protocolMultisigs": {
       "nostr": {

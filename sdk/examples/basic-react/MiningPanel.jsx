@@ -3,20 +3,15 @@ import { useChimera } from '../../src/useChimera.js';
 
 /**
  * MiningPanel — drop-in component for app developers.
+ * Apps only show: consent prompt, start/stop buttons, miner status.
+ * Wallet and earnings are managed on the Chimera landing page.
  *
  * Usage:
  *   import MiningPanel from './MiningPanel';
- *
- *   <MiningPanel
- *     integratorWallet="0xYourWalletAddress"
- *     revenueSplit={{ integrator: 0.30, machineOwner: 0.70 }}
- *   />
+ *   <MiningPanel />
  */
-export default function MiningPanel({ integratorWallet, revenueSplit }) {
-  const { status, consentGiven, giveConsent, revokeConsent, start, stop } = useChimera({
-    integratorWallet,
-    revenueSplit
-  });
+export default function MiningPanel() {
+  const { status, consentGiven, giveConsent, revokeConsent, start, stop } = useChimera();
 
   const s = {
     container: { maxWidth: 360, margin: '0 auto', padding: 24, borderRadius: 16, border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.02)', fontFamily: 'ui-sans-serif,system-ui,-apple-system,sans-serif', color: '#e8e2d8' },
@@ -43,11 +38,8 @@ export default function MiningPanel({ integratorWallet, revenueSplit }) {
       {!consentGiven ? (
         <div style={s.consentBox}>
           <div style={s.consentText}>
-            Enable AI mining to earn revenue from inference tasks.
-            <br /><br />
-            <strong>Revenue split:</strong>
-            <br />• Machine owner: {(revenueSplit?.machineOwner || 0.70) * 100}%
-            <br />• App developer: {(revenueSplit?.integrator || 0.30) * 100}%
+            Enable AI mining to earn revenue from inference tasks while your device is idle.
+            Manage your wallet and view earnings on the Chimera dashboard.
           </div>
           <button style={{ ...s.btn, ...s.btnPrimary }} onClick={giveConsent}>
             I agree — enable mining

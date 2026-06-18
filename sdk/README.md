@@ -2,14 +2,25 @@
 
 Integrate local AI mining into your application. Your users earn revenue from idle inference tasks. You earn a percentage as the app integrator.
 
-## What it does
+## How payouts work
 
-The Chimera SDK exposes the mining node functionality of the QVAC stack without the LLM Wiki UI. It gives your app:
+All mining rewards flow through **Chimera protocol multisigs** — you never need a Bittensor, Solana, or Nostr wallet.
 
-- **Local inference mining** — your users' devices complete AI tasks from networks like Cortensor, Chutes, Fortytwo, Earnidle, and Routstr.
-- **Revenue split** — a configurable percentage of earnings goes to you (the app developer / integrator), the rest to the machine owner.
-- **Consent-first** — users must explicitly opt in before mining starts.
-- **Start / Stop controls** — users can pause mining at any time.
+1. **Mining** — user's device completes tasks on Cortensor, Chutes, Fortytwo, Earnidle, Routstr
+2. **Weekly sweep** — all funds are swept into the Chimera EVM collection multisig
+3. **Monthly distribution** — funds are split and sent to:
+   - **Machine owner** EVM address (set on the Chimera landing page)
+   - **App developer** EVM address (your address, set in SDK options)
+
+Apps only need to pass an **EVM address** — nothing else.
+
+## What the SDK gives your app
+
+- **Consent prompt** — users opt in before any mining starts
+- **Start / Stop controls** — one-click mining controls
+- **Miner status** — real-time view of which miners are active
+
+Wallet setup, earnings tracking, and revenue distribution are handled on the **Chimera landing page**, not in your app.
 
 ## Install
 
@@ -21,50 +32,21 @@ Or copy the `sdk/` folder into your project.
 
 ## Quick Start
 
-### 1. Backend (Node.js)
-
-```javascript
-import { ChimeraSDK } from '@chimera/sdk';
-
-const sdk = new ChimeraSDK({
-  appName: 'MyApp',
-  integratorWallet: '0xYourEvmWalletAddressHere', // your payout address
-  revenueSplit: { integrator: 0.30, machineOwner: 0.70 }
-});
-
-await sdk.init();
-
-// In your UI, ask the user for consent:
-sdk.giveConsent();
-
-// Start mining
-await sdk.start();
-
-// Check status
-console.log(sdk.status());
-
-// Stop mining
-await sdk.stop();
-```
-
-### 2. Frontend (React)
+### React — drop-in component
 
 ```jsx
 import { useChimera } from '@chimera/sdk/src/useChimera.js';
 
 function MiningPanel() {
-  const { status, consentGiven, giveConsent, start, stop } = useChimera({
-    integratorWallet: '0xYourEvmWalletAddressHere',
-    revenueSplit: { integrator: 0.30, machineOwner: 0.70 }
+  const { status, consentGiven, giveConsent, revokeConsent, start, stop } = useChimera({
+    appDeveloperEVM: '0xYourEvmWalletAddressHere' // your payout address
   });
 
   return (
-    <div style={{ padding: 20, borderRadius: 12, border: '1px solid #333' }}>
-      <h3>AI Mining</h3>
-
+    <div>
       {!consentGiven && (
         <div>
-          <p>Enable AI mining to earn while idle. 30% goes to the app developer.</p>
+          <p>Enable AI mining to earn revenue from inference tasks while your device is idle.</p>
           <button onClick={giveConsent}>I agree — enable mining</button>
         </div>
       )}
@@ -73,111 +55,81 @@ function MiningPanel() {
         <div style={{ display: 'flex', gap: 8 }}>
           <button onClick={start} disabled={status.running}>▶ Start</button>
           <button onClick={stop} disabled={!status.running}>⏹ Stop</button>
+          <button onClick={revokeConsent}>Revoke</button>
         </div>
       )}
-
-      <pre>{JSON.stringify(status, null, 2)}</pre>
     </div>
   );
 }
 ```
 
-## Configuration
+That's it. Your app does **not** collect wallet addresses, show earnings, or handle revenue splits — the Chimera dashboard handles all of that.
 
-### `ChimeraSDK` options
+### Backend (optional, for server-side control)
+
+```javascript
+import { ChimeraSDK } from '@chimera/sdk';
+
+const sdk = new ChimeraSDK({
+  appName: 'MyApp',
+  appDeveloperEVM: '0xYourEvmWalletAddressHere'
+});
+
+await sdk.init();
+sdk.giveConsent();
+await sdk.start();
+```
+
+## What your app should NOT do
+
+| ❌ Don't | ✅ Do instead |
+|---|---|
+| Ask users for wallet addresses | Show only consent + start/stop |
+| Display earnings or revenue splits | Link users to the Chimera dashboard |
+| Configure per-chain addresses (Bittensor, Solana, Nostr) | Pass only `appDeveloperEVM` |
+| Handle fund sweeping or distribution | Let the protocol handle it |
+
+## `useChimera` options
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `appName` | string | `'unknown-app'` | Identifier for logs and analytics |
-| `integratorWallet` | string | `null` | Your EVM payout address (required for revenue split) |
-| `revenueSplit` | object | `{ integrator: 0.30, machineOwner: 0.70 }` | Percentage split |
+| `appDeveloperEVM` | string | `null` | Your EVM payout address |
+| `revenueSplit` | object | `{ machineOwner: 0.70, appDeveloper: 0.30 }` | Override split (protocol-level) |
+
+## `ChimeraSDK` options (backend)
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `appName` | string | `'unknown-app'` | Identifier for logs |
+| `appDeveloperEVM` | string | `null` | Your EVM payout address |
+| `machineOwnerEVM` | string | `null` | User's EVM payout address |
 | `configPath` | string | `./config.json` | Path to QVAC config |
 
-### Revenue split
-
-Funds are swept automatically on a weekly / monthly schedule defined in `config.json`:
-
-- **Weekly sweep** — collects all network funds into a multisig
-- **Monthly sweep** — distributes from the multisig using the configured split
-
-The default split is **70% machine owner, 30% integrator**.
-
-To change it:
-
-```javascript
-const sdk = new ChimeraSDK({
-  integratorWallet: '0x...',
-  revenueSplit: { integrator: 0.25, machineOwner: 0.75 }
-});
-```
-
-## API Reference
-
-### `sdk.init()`
-
-Loads config, injects integrator wallet, initializes the node manager.
-
-### `sdk.giveConsent()` / `sdk.revokeConsent()` / `sdk.hasConsent()`
-
-Consent management. Mining will not start without consent.
-
-### `sdk.start()`
-
-Starts the mining node. Returns `{ success, running }`.
-
-### `sdk.stop()`
-
-Stops the mining node. Returns `{ success, running }`.
-
-### `sdk.status()`
-
-Returns current status:
-
-```javascript
-{
-  initialized: true,
-  appName: 'MyApp',
-  consent: true,
-  running: true,
-  miners: { cortensor: { running: true }, chutes: { running: true } },
-  integratorWallet: '0x...',
-  revenueSplit: { integrator: 0.30, machineOwner: 0.70 }
-}
-```
-
-### `sdk.testMiners()`
-
-Runs a health check on all registered miners. Returns latency and success per miner.
-
-### `sdk.shutdown()`
-
-Graceful shutdown. Call this before your app exits.
-
-## How it works
+## Architecture
 
 ```
 ┌─────────────────┐
-│  Your App UI    │  ← calls sdk.start() / sdk.stop()
+│  Your App       │  ← consent checkbox + start/stop buttons
 │  (React, etc.)  │
 └────────┬────────┘
-         │
+         │ useChimera()
 ┌────────▼────────┐
-│  Chimera SDK    │  ← manages consent, wallet config
+│  Chimera SDK    │  ← manages consent, forwards EVM address
 │  (@chimera/sdk) │
 └────────┬────────┘
          │
 ┌────────▼────────┐
-│  NodeManager    │  ← QVAC inference, miner registry
-│  (mining only)  │
+│  Chimera Node   │  ← QVAC inference, miners, protocol multisigs
+│  (localhost)    │
 └────────┬────────┘
          │
 ┌────────▼────────┐
-│  Miner Networks │  ← Cortensor, Chutes, Fortytwo, etc.
-│  (tasks → $$$)  │
+│  Protocol       │  ← weekly sweep → EVM collection multisig
+│  Multisigs      │  ← monthly split → machine owner + app developer
 └─────────────────┘
 ```
 
-## Full example app
+## Full example
 
 See `examples/basic-react/` for a complete working integration.
 

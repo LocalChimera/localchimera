@@ -31,8 +31,9 @@ const logger = new Logger('ChimeraSDK');
 export class ChimeraSDK {
   constructor(opts = {}) {
     this.appName = opts.appName || 'unknown-app';
-    this.integratorWallet = opts.integratorWallet || null;
-    this.revenueSplit = opts.revenueSplit || { integrator: 0.30, machineOwner: 0.70 };
+    this.machineOwnerEVM = opts.machineOwnerEVM || null;
+    this.appDeveloperEVM = opts.appDeveloperEVM || null;
+    this.revenueSplit = opts.revenueSplit || { machineOwner: 0.70, appDeveloper: 0.30 };
     this.configPath = opts.configPath || path.join(process.cwd(), 'config.json');
     this.userConsent = false;
     this.nodeManager = null;
@@ -47,13 +48,18 @@ export class ChimeraSDK {
     const raw = await fs.readFile(this.configPath, 'utf-8');
     this._config = JSON.parse(raw);
 
-    // Inject integrator wallet into multisig config
-    if (this.integratorWallet) {
+    // Inject user EVM addresses into multisig config
+    if (this.machineOwnerEVM) {
       this._config.multisig = this._config.multisig || {};
-      this._config.multisig.appDeveloperAddress = this.integratorWallet;
+      this._config.multisig.machineOwnerAddress = this.machineOwnerEVM;
+      logger.info(`[${this.appName}] Machine owner EVM: ${this.machineOwnerEVM}`);
+    }
+    if (this.appDeveloperEVM) {
+      this._config.multisig = this._config.multisig || {};
+      this._config.multisig.appDeveloperAddress = this.appDeveloperEVM;
       this._config.multisig.revenueSplit = this.revenueSplit;
-      logger.info(`[${this.appName}] Integrator wallet set: ${this.integratorWallet}`);
-      logger.info(`[${this.appName}] Revenue split — integrator: ${(this.revenueSplit.integrator * 100).toFixed(0)}%, machine owner: ${(this.revenueSplit.machineOwner * 100).toFixed(0)}%`);
+      logger.info(`[${this.appName}] App developer EVM: ${this.appDeveloperEVM}`);
+      logger.info(`[${this.appName}] Revenue split — machine owner: ${(this.revenueSplit.machineOwner * 100).toFixed(0)}%, app developer: ${(this.revenueSplit.appDeveloper * 100).toFixed(0)}%`);
     }
 
     // Disable wiki / AI writer features — SDK is mining-only
@@ -121,7 +127,8 @@ export class ChimeraSDK {
       consent: this.userConsent,
       running: s.running,
       miners: s.mining?.minerStatus || {},
-      integratorWallet: this.integratorWallet,
+      machineOwnerEVM: this.machineOwnerEVM,
+      appDeveloperEVM: this.appDeveloperEVM,
       revenueSplit: this.revenueSplit
     };
   }

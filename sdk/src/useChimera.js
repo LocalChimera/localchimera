@@ -33,8 +33,8 @@ export function useChimera(opts = {}) {
   const [consentGiven, setConsentGiven] = useState(false);
   const intervalRef = useRef(null);
 
-  const integratorWallet = opts.integratorWallet || null;
-  const revenueSplit = opts.revenueSplit || { integrator: 0.30, machineOwner: 0.70 };
+  const appDeveloperEVM = opts.appDeveloperEVM || null;
+  const revenueSplit = opts.revenueSplit || { machineOwner: 0.70, appDeveloper: 0.30 };
 
   const fetchStatus = useCallback(async () => {
     try {
@@ -80,8 +80,8 @@ export function useChimera(opts = {}) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          wallet: opts.machineOwnerWallet || null,
-          integratorWallet,
+          machineOwnerEVM: opts.machineOwnerEVM || null,
+          appDeveloperEVM,
           revenueSplit
         })
       });
