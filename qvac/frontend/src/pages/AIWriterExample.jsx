@@ -45,64 +45,10 @@ export default function AIWriterExample({ onNavigateBack, onNavigateToDashboard 
     }
   };
 
-  const downloadFile = (content, filename, mimeType = 'text/plain') => {
-    const blob = new Blob([content], { type: mimeType });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  };
-
-  const detectOS = () => {
-    const ua = navigator.userAgent;
-    if (/Android/i.test(ua)) return 'android';
-    if (/iPhone|iPad|iPod/i.test(ua)) return 'ios';
-    if (ua.indexOf('Win') !== -1) return 'windows';
-    if (ua.indexOf('Mac') !== -1) return 'mac';
-    return 'linux';
-  };
-
-  const handleDownload = () => {
-    const os = detectOS();
+  const handleInstall = () => {
     const address = evmAddress || '0x0000000000000000000000000000000000000000';
-
-    if (os === 'android') {
-      const link = document.createElement('a');
-      link.href = './chimera-miner.apk';
-      link.download = 'chimera-miner.apk';
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      setInstalled(true);
-      return;
-    }
-
-    if (os === 'ios') {
-      window.open('https://testflight.apple.com/join/chimera-miner', '_blank');
-      setInstalled(true);
-      return;
-    }
-
-    let startFile, stopFile, startContent, stopContent;
-
-    if (os === 'windows') {
-      startFile = 'start-node.bat';
-      stopFile = 'stop-node.bat';
-      startContent = `@echo off\r\necho ======================================\r\necho   QVAC-Pear Miner - START\r\necho ======================================\r\necho.\r\necho Checking Docker...\r\ndocker --version >nul 2>&1\r\nif errorlevel 1 (\r\n  echo Docker not found. Please install it from https://www.docker.com/products/docker-desktop/\r\n  pause\r\n  exit /b 1\r\n)\r\necho.\r\necho Downloading QVAC-Pear Miner...\r\nif not exist qvac-pear-miner-node (\r\n  git clone https://github.com/TerexitariusStomp/qvac-pear-miner-node.git || (echo Git not found & pause & exit /b 1)\r\n)\r\ncd qvac-pear-miner-node\r\necho Building and starting container...\r\nset MACHINE_OWNER_EVM=${address}\r\nset APP_ID=protocol-default\r\ndocker-compose up -d --build || (echo Docker Compose failed & pause & exit /b 1)\r\necho.\r\necho Waiting for server...\r\ntimeout /t 15 /nobreak >nul\r\necho Opening dashboard...\r\nstart http://localhost:3000\r\necho.\r\necho ======================================\r\necho   Node is RUNNING!\r\necho   To stop, run: stop-node.bat\r\necho ======================================\r\npause\r\n`;
-      stopContent = `@echo off\r\necho ======================================\r\necho   QVAC-Pear Miner - STOP\r\necho ======================================\r\necho.\r\necho Stopping node container...\r\ncd qvac-pear-miner-node 2>nul\r\ndocker-compose down\r\necho.\r\necho Node stopped. You can close this window.\r\npause\r\n`;
-    } else {
-      startFile = 'start-node.sh';
-      stopFile = 'stop-node.sh';
-      startContent = `#!/bin/bash\necho "========================================"\necho "  QVAC-Pear Miner - START"\necho "========================================"\necho\necho "Checking Docker..."\nif ! command -v docker &> /dev/null; then\n  echo "Docker not found. Please install it:"\n  echo "  macOS: https://www.docker.com/products/docker-desktop/"\n  echo "  Linux: sudo apt install docker.io docker-compose"\n  exit 1\nfi\ndocker --version\necho\necho "Downloading QVAC-Pear Miner..."\nif [ ! -d "qvac-pear-miner-node" ]; then\n  git clone https://github.com/TerexitariusStomp/qvac-pear-miner-node.git || { echo "Git not found."; exit 1; }\nfi\ncd qvac-pear-miner-node\necho "Building and starting container..."\nexport MACHINE_OWNER_EVM=${address}\nexport APP_ID=protocol-default\ndocker-compose up -d --build || { echo "Docker Compose failed."; exit 1; }\necho\necho "Waiting for server..."\nsleep 15\necho "Opening dashboard..."\nopen http://localhost:3000 2>/dev/null || xdg-open http://localhost:3000 2>/dev/null || echo "Please open http://localhost:3000"\necho\necho "========================================"\necho "  Node is RUNNING!"\necho "  To stop, run: bash stop-node.sh"\necho "========================================"\nread -p "Press Enter to close"\n`;
-      stopContent = `#!/bin/bash\necho "========================================"\necho "  QVAC-Pear Miner - STOP"\necho "========================================"\necho\necho "Stopping node container..."\ncd qvac-pear-miner-node 2>/dev/null || true\ndocker-compose down\necho\necho "Node stopped."\n`;
-    }
-
-    downloadFile(startContent, startFile, 'text/plain');
-    setTimeout(() => downloadFile(stopContent, stopFile, 'text/plain'), 500);
+    localStorage.setItem('chimeraEvmAddress', address);
+    window.open('/wiki', '_blank');
     setInstalled(true);
   };
 
@@ -164,11 +110,11 @@ export default function AIWriterExample({ onNavigateBack, onNavigateToDashboard 
                 </div>
                 <div className="flex items-start gap-2">
                   <div className="w-4 h-4 bg-white/20 rounded-full flex items-center justify-center flex-shrink-0 text-white text-[8px] font-bold">2</div>
-                  <span className="text-[10px] text-white">Download auto-detected installer</span>
+                  <span className="text-[10px] text-white">Open LLM Wiki — your miner node</span>
                 </div>
                 <div className="flex items-start gap-2">
                   <div className="w-4 h-4 bg-white/20 rounded-full flex items-center justify-center flex-shrink-0 text-white text-[8px] font-bold">3</div>
-                  <span className="text-[10px] text-white">Run in Docker & earn</span>
+                  <span className="text-[10px] text-white">Start mining & earn</span>
                 </div>
               </div>
               <input
@@ -178,14 +124,14 @@ export default function AIWriterExample({ onNavigateBack, onNavigateToDashboard 
                 onChange={e => setEvmAddress(e.target.value)}
               />
               <button
-                onClick={handleDownload}
+                onClick={handleInstall}
                 disabled={!evmAddress.match(/^0x[a-fA-F0-9]{40}$/)}
                 className="w-full bg-green-600 hover:bg-green-500 disabled:bg-gray-600 disabled:cursor-not-allowed text-white text-xs font-medium py-1.5 rounded transition-colors flex items-center justify-center gap-1"
               >
-                <Download className="w-3 h-3" /> Download & Install
+                <Download className="w-3 h-3" /> Open LLM Wiki
               </button>
               <p className="text-[9px] text-indigo-200/70 text-center">
-                {detectOS() === 'android' ? 'Android (.apk)' : detectOS() === 'ios' ? 'iOS (TestFlight)' : detectOS() === 'windows' ? 'Windows (.bat)' : detectOS() === 'mac' ? 'macOS (.sh)' : 'Linux (.sh)'}
+                Wiki runs the miner node. Start/stop in sidebar.
               </p>
               <button
                 onClick={() => setShowSetup(false)}

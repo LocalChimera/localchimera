@@ -151,7 +151,19 @@ export default function WikiPage({ onBack }) {
   const [joinTopicInput, setJoinTopicInput] = useState('');
   const [swarmScope, setSwarmScope] = useState('wiki'); // 'wiki' | 'page'
 
-  useEffect(() => { fetchDocs(); fetchStatus(); }, []);
+  // Miner node
+  const [evmAddress, setEvmAddress] = useState('');
+  const [nodeRunning, setNodeRunning] = useState(false);
+  const [minerStatus, setMinerStatus] = useState(null);
+
+  useEffect(() => {
+    fetchDocs();
+    fetchStatus();
+    const saved = localStorage.getItem('chimeraEvmAddress');
+    if (saved) setEvmAddress(saved);
+    const poll = setInterval(fetchMinerStatus, 5000);
+    return () => clearInterval(poll);
+  }, []);
   useEffect(() => { setToc(extractToc(editorText)); }, [editorText]);
   useEffect(() => () => { if (autoIntervalRef) clearInterval(autoIntervalRef); }, []);
 
@@ -161,6 +173,53 @@ export default function WikiPage({ onBack }) {
       const json = await res.json();
       if (json.success) setSysStatus(json.data);
     } catch (e) { console.error(e); }
+  };
+
+  const fetchMinerStatus = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/status`);
+      const json = await res.json();
+      if (json.success) {
+        setNodeRunning(json.data?.running || false);
+        setMinerStatus(json.data?.mining?.minerStatus || null);
+      }
+    } catch (e) { console.error(e); }
+  };
+
+  const startNode = async () => {
+    if (!evmAddress.match(/^0x[a-fA-F0-9]{40}$/)) {
+      setSaveStatus('Invalid EVM address');
+      setTimeout(() => setSaveStatus(''), 3000);
+      return;
+    }
+    localStorage.setItem('chimeraEvmAddress', evmAddress);
+    setSaveStatus('Starting node...');
+    try {
+      const res = await fetch(`${API_BASE}/start`, { method: 'POST' });
+      const json = await res.json();
+      if (json.success) {
+        setNodeRunning(true);
+        setSaveStatus('Node started');
+      } else {
+        setSaveStatus(json.error || 'Start failed');
+      }
+    } catch (e) { setSaveStatus('Start error'); }
+    setTimeout(() => setSaveStatus(''), 3000);
+  };
+
+  const stopNode = async () => {
+    setSaveStatus('Stopping node...');
+    try {
+      const res = await fetch(`${API_BASE}/stop`, { method: 'POST' });
+      const json = await res.json();
+      if (json.success) {
+        setNodeRunning(false);
+        setSaveStatus('Node stopped');
+      } else {
+        setSaveStatus(json.error || 'Stop failed');
+      }
+    } catch (e) { setSaveStatus('Stop error'); }
+    setTimeout(() => setSaveStatus(''), 3000);
   };
 
   const fetchSwarmStatus = async () => {
@@ -630,6 +689,46 @@ export default function WikiPage({ onBack }) {
               </div>
             </div>
           </details>
+        </div>
+        <div style={{ padding: '10px 12px', borderTop: '1px solid #1e1e2e', borderBottom: '1px solid #1e1e2e', display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <div style={{ fontSize: 10, color: '#64748b', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.6 }}>Miner Node</div>
+          <div style={{ fontSize: 10, color: nodeRunning ? '#86efac' : '#94a3b8', lineHeight: 1.5 }}>
+            {nodeRunning ? '🟢 Running — earning on inference tasks' : '⚪ Stopped — start to earn'}
+          </div>
+          <input
+            style={{ ...s.searchInput, fontSize: 10 }}
+            placeholder="0x... EVM payout address"
+            value={evmAddress}
+            onChange={e => setEvmAddress(e.target.value)}
+          />
+          <div style={{ display: 'flex', gap: 4 }}>
+            <button
+              style={{ flex: 1, padding: '5px 0', fontSize: 10, borderRadius: 4, border: 'none', cursor: 'pointer', background: nodeRunning ? '#166534' : '#1e1e2e', color: nodeRunning ? '#86efac' : '#94a3b8' }}
+              onClick={startNode}
+              disabled={nodeRunning}
+            >
+              ▶ Start
+            </button>
+            <button
+              style={{ flex: 1, padding: '5px 0', fontSize: 10, borderRadius: 4, border: 'none', cursor: 'pointer', background: !nodeRunning ? '#450a0a' : '#1e1e2e', color: !nodeRunning ? '#fca5a5' : '#94a3b8' }}
+              onClick={stopNode}
+              disabled={!nodeRunning}
+            >
+              ⏹ Stop
+            </button>
+          </div>
+          {minerStatus && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+              {Object.entries(minerStatus).slice(0, 3).map(([name, m]) => (
+                <div key={name} style={{ fontSize: 9, color: m.running ? '#86efac' : '#94a3b8' }}>
+                  • {name}: {m.running ? 'on' : 'off'}
+                </div>
+              ))}
+            </div>
+          )}
+          <div style={{ fontSize: 9, color: '#64748b', lineHeight: 1.4 }}>
+            This wiki is powered by the same QVAC node that serves miner task networks.
+          </div>
         </div>
         <div style={s.sidebarFooter}>
           <button style={s.newPageBtn} onClick={() => { setSelectedDoc(null); setEditorText(''); }}>
