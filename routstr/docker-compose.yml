@@ -14,7 +14,7 @@ services:
     env_file:
       - /home/user/.routstr/.env
     environment:
-      - HTTP_URL=http://10.137.0.9:8000
+      - HTTP_URL=http://localchimera.com:8000
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
