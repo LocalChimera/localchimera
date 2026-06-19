@@ -17,12 +17,12 @@ fZf7vQid4otudHLFJBWkiazcayJz9g==
 -----END EC PRIVATE KEY-----`;
 
 async function main() {
-  const key = sdk.PrivateKey.fromPem(PROVIDER_PEM, sdk.KeyAlgorithm.SECP256K1);
-  const consumerKey = sdk.PrivateKey.fromPem(CONSUMER_PEM, sdk.KeyAlgorithm.SECP256K1);
+  const key = sdk.PrivateKey.fromPem(CONSUMER_PEM, sdk.KeyAlgorithm.SECP256K1);
+  const providerKey = sdk.PrivateKey.fromPem(PROVIDER_PEM, sdk.KeyAlgorithm.SECP256K1);
 
   const deploy = sdk.makeCsprTransferDeploy({
     senderPublicKeyHex: key.publicKey.toHex(),
-    recipientPublicKeyHex: consumerKey.publicKey.toHex(),
+    recipientPublicKeyHex: providerKey.publicKey.toHex(),
     transferAmount: '2500000000',
     paymentAmount: '100000000',
     chainName: CHAIN_NAME,

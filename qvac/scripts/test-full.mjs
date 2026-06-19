@@ -28,17 +28,19 @@ async function main() {
   console.log('Account hash:', accountHashHex);
   console.log('Contract hash:', CONTRACT_HASH);
 
-  // Step 1: Transfer to contract purse
+  // Step 1: Transfer to contract purse using TransferDeployItem.newTransfer
   const transferPayment = ExecutableDeployItem.standardPayment('10000000000');
   const transferHeader = DeployHeader.default();
   transferHeader.account = publicKey;
   transferHeader.chainName = CHAIN_NAME;
-  const transferDeployItem = new sdk.TransferDeployItem(
-    '1000',
+
+  const transferDeployItem = sdk.TransferDeployItem.newTransfer(
+    '2500000000',
     sdk.URef.fromString(CONTRACT_PURSE)
   );
   const transferSession = new ExecutableDeployItem();
   transferSession.transfer = transferDeployItem;
+
   const transferDeploy = Deploy.makeDeploy(transferHeader, transferPayment, transferSession);
   transferDeploy.sign(privateKey);
 
@@ -59,11 +61,10 @@ async function main() {
     return;
   }
 
-  // Wait for transfer to execute
+  // Wait for transfer
   console.log('Waiting for transfer execution...');
   await new Promise(r => setTimeout(r, 25000));
 
-  // Check transfer result
   const transferInfoRes = await fetch(RPC_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -77,13 +78,26 @@ async function main() {
   const transferExec = transferInfo.result?.execution_info?.execution_result?.Version2;
   console.log('Transfer execution:', transferExec?.error_message || 'SUCCESS');
 
+  // Check contract purse balance
+  const balanceRes = await fetch(RPC_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      jsonrpc: '2.0', id: 1,
+      method: 'query_balance',
+      params: { purse_identifier: { purse_uref: CONTRACT_PURSE } }
+    })
+  });
+  const balanceData = await balanceRes.json();
+  console.log('Contract purse balance:', balanceData.result?.balance);
+
   // Step 2: Call create_job
   const argsMap = {
     consumer: CLValue.newCLByteArray(hexToBytes(accountHashHex)),
     provider: CLValue.newCLByteArray(hexToBytes('f227d4fb7c50164d363c5461ad0044ef8f3b8ad5ee7072b87384e101a2a4263d')),
-    amount: CLValue.newCLUInt512('1000'),
+    amount: CLValue.newCLUInt512('2500000000'),
     provider_fee_bps: CLValue.newCLUint64('100'),
-    order_id: CLValue.newCLString('test-job-6'),
+    order_id: CLValue.newCLString('test-job-8'),
   };
 
   const args = Args.fromMap(argsMap);
@@ -108,14 +122,13 @@ async function main() {
     })
   });
   const data = await res.json();
-  console.log('create_job deploy result:', JSON.stringify(data, null, 2));
+  console.log('create_job result:', JSON.stringify(data, null, 2));
 
   if (data.error) {
     console.error('create_job failed:', data.error);
     return;
   }
 
-  // Wait for create_job execution
   console.log('Waiting for create_job execution...');
   await new Promise(r => setTimeout(r, 25000));
 
