@@ -99,56 +99,15 @@ fn spawn_qvac(state: State<SidecarHandle>, qvac_dir: &PathBuf, data_dir: &PathBu
         return Ok("qvac already running".to_string());
     }
 
-    // Try hardened Docker container first
-    if docker_available() {
-        match spawn_qvac_docker(qvac_dir, data_dir) {
-            Ok(child) => {
-                *guard = Some(child);
-                return Ok("qvac started (docker)".to_string());
-            }
-            Err(e) => {
-                eprintln!("[chimera] Docker mode failed ({}), falling back to direct Node.js", e);
-            }
-        }
+    if !docker_available() {
+        return Err("Docker is required to run Chimera. Please install Docker Desktop and try again.".to_string());
     }
 
-    // Fallback: direct Node.js process
-    let script = qvac_dir.join("src").join("index.js");
-    let child = if cfg!(windows) {
-        Command::new("node")
-            .arg(&script)
-            .current_dir(qvac_dir)
-            .env("PORT", "3002")
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-    } else {
-        let auto_sh = qvac_dir.join("start-auto.sh");
-        if auto_sh.exists() {
-            Command::new("bash")
-                .arg(&auto_sh)
-                .current_dir(qvac_dir)
-                .env("PORT", "3002")
-                .stdin(Stdio::piped())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .spawn()
-        } else {
-            Command::new("node")
-                .arg(&script)
-                .current_dir(qvac_dir)
-                .env("PORT", "3002")
-                .stdin(Stdio::piped())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .spawn()
-        }
-    }
-    .map_err(|e| format!("failed to spawn qvac: {}", e))?;
+    let child = spawn_qvac_docker(qvac_dir, data_dir)
+        .map_err(|e| format!("Docker failed: {}", e))?;
 
     *guard = Some(child);
-    Ok("qvac started (direct)".to_string())
+    Ok("qvac started (docker)".to_string())
 }
 
 #[tauri::command]
@@ -163,6 +122,12 @@ fn stop_supervisor(state: State<SidecarHandle>) -> Result<String, String> {
         let _ = child.kill();
         let _ = child.wait();
     }
+    // Also stop the named container if it is still running
+    let _ = Command::new("docker")
+        .args(["stop", "-t", "5", "chimera-desktop"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
     Ok("qvac stopped".to_string())
 }
 
@@ -170,6 +135,11 @@ fn stop_supervisor(state: State<SidecarHandle>) -> Result<String, String> {
 fn supervisor_status(state: State<SidecarHandle>) -> Result<bool, String> {
     let guard = state.0.lock().map_err(|e| e.to_string())?;
     Ok(guard.is_some())
+}
+
+#[tauri::command]
+fn docker_status() -> Result<bool, String> {
+    Ok(docker_available())
 }
 
 #[derive(serde::Serialize)]
@@ -384,6 +354,7 @@ fn main() {
             start_supervisor,
             stop_supervisor,
             supervisor_status,
+            docker_status,
             check_for_updates,
             set_autostart,
             get_autostart,

@@ -21,6 +21,9 @@ export function Dashboard() {
   const [taskbarIcon, setTaskbarIcon] = useState(false);
   const [settingsLoading, setSettingsLoading] = useState({ auto: false, desk: false, task: false });
 
+  // Docker status
+  const [dockerPresent, setDockerPresent] = useState<boolean | null>(null);
+
   const apiBase = "http://localhost:";
   const supervisorPort = "9876";
 
@@ -37,6 +40,10 @@ export function Dashboard() {
     fetchStatus();
     const interval = setInterval(fetchStatus, 2000);
     return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    invoke<boolean>("docker_status").then(setDockerPresent).catch(() => setDockerPresent(false));
   }, []);
 
   useEffect(() => {
@@ -92,6 +99,22 @@ export function Dashboard() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20, maxWidth: 800, margin: "0 auto" }}>
+      {/* Docker required banner */}
+      {dockerPresent === false && (
+        <div style={{
+          padding: "12px 16px",
+          borderRadius: 8,
+          background: "#450a0a",
+          border: "1px solid #b91c1c",
+          color: "#fca5a5",
+          fontSize: 13,
+          fontWeight: 600,
+        }}>
+          🐳 Docker is required. Chimera runs inside a hardened container.
+          <a href="https://docs.docker.com/get-docker/" target="_blank" rel="noopener" style={{ color: "#00e5ff", marginLeft: 8 }}>Install Docker →</a>
+        </div>
+      )}
+
       {/* Status bar */}
       <div style={{
         display: "flex",
@@ -109,11 +132,6 @@ export function Dashboard() {
           <div style={{ fontSize: 16, fontWeight: 600, color: status?.running ? "#86efac" : "#fca5a5" }}>
             {status?.running ? "🟢 Running" : "⚪ Stopped"}
           </div>
-          {status?.docker_present === false && (
-            <div style={{ fontSize: 12, color: "#fca5a5", marginTop: 4 }}>
-              Docker not detected — install Docker Desktop
-            </div>
-          )}
           {status?.error && (
             <div style={{ fontSize: 12, color: "#fca5a5", marginTop: 4 }}>
               Error: {status.error}
@@ -124,20 +142,20 @@ export function Dashboard() {
           {!status?.running ? (
             <button
               onClick={startApp}
-              disabled={loading.start}
+              disabled={loading.start || dockerPresent === false}
               style={{
                 padding: "8px 18px",
                 borderRadius: 6,
                 border: "none",
-                background: "#c9a96e",
-                color: "#0e0d0b",
+                background: dockerPresent === false ? "#450a0a" : "#c9a96e",
+                color: dockerPresent === false ? "#fca5a5" : "#0e0d0b",
                 fontWeight: 600,
                 fontSize: 13,
-                cursor: loading.start ? "not-allowed" : "pointer",
-                opacity: loading.start ? 0.6 : 1,
+                cursor: (loading.start || dockerPresent === false) ? "not-allowed" : "pointer",
+                opacity: (loading.start || dockerPresent === false) ? 0.5 : 1,
               }}
             >
-              {loading.start ? "Starting..." : "▶ Start App"}
+              {loading.start ? "Starting..." : dockerPresent === false ? "🐳 Docker Required" : "▶ Start App"}
             </button>
           ) : (
             <button
