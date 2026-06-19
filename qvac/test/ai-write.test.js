@@ -255,4 +255,71 @@ describe('AI Write Options', () => {
     const json = await res.json();
     assert.equal(json.success, true);
   });
+
+  it('rewrite handles style-based prompt pattern', async () => {
+    const res = await fetch(`http://127.0.0.1:${port}/api/ai-write`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: 'Rewrite the following text in a formal style. Output ONLY the rewritten text — no preamble, no explanation, no markdown fences unless the original had them.\n\nOriginal text:\nHello world' })
+    });
+    assert.equal(res.status, 200);
+    const json = await res.json();
+    assert.equal(json.success, true);
+    assert.ok(json.data.body.includes('Result for:'));
+  });
+
+  it('edit mini-buttons handle instruction+text pattern', async () => {
+    const res = await fetch(`http://127.0.0.1:${port}/api/ai-write`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: 'Rewrite more concisely. Output ONLY the result.\n\nText:\nHello world this is a long sentence' })
+    });
+    assert.equal(res.status, 200);
+    const json = await res.json();
+    assert.equal(json.success, true);
+  });
+
+  it('inline toolbar shorten action handles prompt', async () => {
+    const res = await fetch(`http://127.0.0.1:${port}/api/ai-write`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: 'Shorten. Output ONLY the result.\n\nText:\nThis is a very long paragraph that needs to be shortened significantly.' })
+    });
+    assert.equal(res.status, 200);
+    const json = await res.json();
+    assert.equal(json.success, true);
+  });
+
+  it('inline toolbar explain action handles analyze prompt', async () => {
+    const res = await fetch(`http://127.0.0.1:${port}/api/ai-write`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: 'Explain why weak. Output ONLY the result.\n\nText:\nHello world' })
+    });
+    assert.equal(res.status, 200);
+    const json = await res.json();
+    assert.equal(json.success, true);
+  });
+
+  it('readability score handles analyze prompt', async () => {
+    const res = await fetch(`http://127.0.0.1:${port}/api/ai-write`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: 'Estimate the reading level and readability of the following text (Flesch Reading Ease score and grade level). Output ONLY the score and brief assessment.\n\nText:\nThe quick brown fox jumps over the lazy dog.' })
+    });
+    assert.equal(res.status, 200);
+    const json = await res.json();
+    assert.equal(json.success, true);
+  });
+
+  it('weakness scan handles analyze prompt', async () => {
+    const res = await fetch(`http://127.0.0.1:${port}/api/ai-write`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: 'Flag any overused phrases, repetitions, weak claims, or inconsistencies in the following text. Output ONLY the findings.\n\nText:\nVery very good indeed.' })
+    });
+    assert.equal(res.status, 200);
+    const json = await res.json();
+    assert.equal(json.success, true);
+  });
 });
