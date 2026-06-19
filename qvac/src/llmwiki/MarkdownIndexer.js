@@ -66,16 +66,19 @@ export class MarkdownIndexer {
         const rel = path.relative(this.wikiDir, full);
         const meta = _parseFrontmatter(text);
         const body = text.replace(FRONTMATTER_RE, '').trim();
-        const docId = rel.replace(/\\/g, '/');
+        const relPath = rel.replace(/\\/g, '/');
+        const conceptId = meta.id || relPath.replace(/\.md$/, '');
 
         docs.push({
-          id: docId,
-          path: '/' + rel.replace(/\\/g, '/'),
-          relPath: rel.replace(/\\/g, '/'),
+          id: conceptId,
+          path: '/' + relPath,
+          relPath,
           filename: ent.name,
           title: meta.title || ent.name.replace('.md', ''),
           description: meta.description || '',
-          date: meta.date || '',
+          date: meta.created || meta.date || '',
+          created: meta.created || '',
+          modified: meta.modified || '',
           tags: Array.isArray(meta.tags) ? meta.tags : [],
           category: path.dirname(rel).replace(/\\/g, '/'),
           body,
@@ -85,7 +88,7 @@ export class MarkdownIndexer {
 
         let m;
         while ((m = WIKILINK_RE.exec(text)) !== null) {
-          links.push({ from: docId, to: m[1].trim(), type: 'wikilink' });
+          links.push({ from: conceptId, to: m[1].trim(), type: 'wikilink' });
         }
       }
     }

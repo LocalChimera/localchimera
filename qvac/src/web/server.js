@@ -441,8 +441,10 @@ print(result.text_content)
     const fileName = `${slug || 'untitled'}.md`;
     const wikiDir = path.join(process.cwd(), 'llmwiki-data', 'wiki', category);
     const filePath = path.join(wikiDir, fileName);
+    const conceptId = `${category}/${slug || 'untitled'}`;
+    const today = new Date().toISOString().split('T')[0];
 
-    const frontmatter = `---\ntitle: ${title}\ndescription: AI-generated wiki page\ndate: ${new Date().toISOString().split('T')[0]}\ntags: ${JSON.stringify(tags)}\n---\n\n`;
+    const frontmatter = `---\nid: ${conceptId}\ntitle: ${title}\ndescription: AI-generated wiki page\ntags: ${JSON.stringify(tags)}\ncreated: ${today}\nmodified: ${today}\n---\n\n`;
 
     try {
       await fs.mkdir(wikiDir, { recursive: true });
@@ -466,7 +468,7 @@ print(result.text_content)
       // ─── Pear P2P broadcast ───
       const p2p = this.nodeManager?.p2pNetwork;
       if (p2p) {
-        const pageId = `${category}/${fileName}`;
+        const pageId = conceptId;
         const msg = { type: 'wiki-new-page', title, category, fileName, content: frontmatter + content, tags, timestamp: Date.now() };
 
         // Broadcast to wiki-wide swarms
@@ -486,7 +488,7 @@ print(result.text_content)
 
       // Refresh index so it appears immediately
       await this.indexer.index();
-      ok(res, { id: `${category}/${fileName}`, title, path: `/${category}/${fileName}`, category, tags });
+      ok(res, { id: conceptId, title, path: `/${category}/${fileName}`, category, tags });
     } catch (e) {
       this.logger.error(`[llmwiki] Save failed: ${e.message}`);
       serverError(res, e);

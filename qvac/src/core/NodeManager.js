@@ -118,10 +118,12 @@ export class NodeManager {
         const path = await import('path');
         const slug = (title || 'untitled').toLowerCase().replace(/[^\w\s-]/g, '').replace(/\s+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
         const fileName = `${slug || 'untitled'}.md`;
+        const conceptId = `${category}/${slug || 'untitled'}`;
+        const today = new Date().toISOString().split('T')[0];
         const wikiDir = path.join(process.cwd(), 'llmwiki-data', 'wiki', category);
         await fs.mkdir(wikiDir, { recursive: true });
         const filePath = path.join(wikiDir, fileName);
-        const frontmatter = `---\ntitle: ${title}\ndescription: AI-generated wiki page\ndate: ${new Date().toISOString().split('T')[0]}\ntags: ${JSON.stringify(tags)}\n---\n\n`;
+        const frontmatter = `---\nid: ${conceptId}\ntitle: ${title}\ndescription: AI-generated wiki page\ntags: ${JSON.stringify(tags)}\ncreated: ${today}\nmodified: ${today}\n---\n\n`;
         await fs.writeFile(filePath, frontmatter + (content || ''), 'utf-8');
         this.logger.info(`[swarm] Saved ${filePath}`);
         if (this.webServer?.indexer) await this.webServer.indexer.index();

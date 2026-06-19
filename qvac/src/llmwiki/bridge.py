@@ -23,14 +23,14 @@ MAX_SOURCE_CHARS = 15_000
 
 GUIDE_OVERVIEW = """# Overview
 
-This wiki is maintained by QVAC — a local AI node that generates and updates
-pages from prompts. Sources and generated content compound over time.
+This wiki follows the [Open Knowledge Format (OKF)](https://github.com/GoogleCloudPlatform/knowledge-catalog/tree/main/okf). It is maintained by QVAC — a local AI node that generates and updates pages from prompts.
 
 ## Key Findings
 
 - QVAC local inference (SmolLM2 360M) powers all wiki generation
 - Content is markdown with YAML frontmatter, stored on disk + indexed in SQLite
 - Cross-references link concepts ↔ entities and back to sources
+- OKF bundle structure: index.md, log.md, and categorized concept documents
 
 ## Recent Updates
 
@@ -47,10 +47,17 @@ def _sanitize_filename(title: str) -> str:
     return _slugify(title) or "page"
 
 
-def _build_frontmatter(title: str, description: str, tags: list[str]) -> str:
+def _build_frontmatter(concept_id: str, title: str, description: str, tags: list[str]) -> str:
+    today = date.today().isoformat()
     return (
-        f"---\ntitle: {title}\ndescription: {description}\n"
-        f"date: {date.today().isoformat()}\ntags: {json.dumps(tags)}\n---\n\n"
+        f"---\n"
+        f"id: {concept_id}\n"
+        f"title: {title}\n"
+        f"description: {description}\n"
+        f"tags: {json.dumps(tags)}\n"
+        f"created: {today}\n"
+        f"modified: {today}\n"
+        f"---\n\n"
     )
 
 
@@ -140,7 +147,7 @@ class WikiWriter:
         disk_path.write_text(content, encoding="utf-8")
         print(f"[bridge] Written to {disk_path}")
 
-        doc_id = str(uuid4())
+        doc_id = f"{self.category}/{slug}"
         self._index(doc_id, filename, title, rel_path, content, tags)
         self._update_overview(f"Created {self.category}/{filename} — {title}")
         self._append_log("generate", f"QVAC created {self.category}/{filename}")
@@ -218,7 +225,8 @@ def create_wiki_page(
 
     writer = WikiWriter(workspace, category)
     try:
-        doc_id = writer.write(title, _build_frontmatter(title, desc, effective_tags) + body, effective_tags)
+        concept_id = f"{args.category}/{_sanitize_filename(title)}"
+        doc_id = writer.write(title, _build_frontmatter(concept_id, title, desc, effective_tags) + body, effective_tags)
     finally:
         writer.close()
     return doc_id
