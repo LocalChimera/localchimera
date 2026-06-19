@@ -79,15 +79,39 @@ Files are organized on disk under `llmwiki-data/wiki/`:
 - `concepts/` — theoretical topics
 - `entities/` — concrete things (people, products, algorithms, etc.)
 
-Each page includes YAML frontmatter:
+Each page follows the [Open Knowledge Format (OKF)](https://github.com/GoogleCloudPlatform/knowledge-catalog/tree/main/okf) and includes YAML frontmatter:
 
 ```yaml
 ---
+id: concepts/getting-started
 title: Page Title
 description: Short summary
-date: 2026-06-16
-tags: [tag1, tag2]
+tags:
+  - tag1
+  - tag2
+created: 2026-06-16
+modified: 2026-06-16
 ---
+```
+
+- `id` — Concept ID (path without `.md` suffix, e.g. `concepts/getting-started`)
+- `title` — Human-readable title
+- `description` — Short summary
+- `tags` — YAML list of tags
+- `created` / `modified` — ISO-8601 dates
+
+Files are organized on disk under `llmwiki-data/wiki/` as an OKF bundle:
+
+```
+llmwiki-data/wiki/
+├── index.md                 # Bundle root listing
+├── log.md                   # Update history
+├── concepts/
+│   ├── index.md             # Directory listing
+│   └── getting-started.md   # Concept document
+└── entities/
+    ├── index.md
+    └── example.md
 ```
 
 The `MarkdownIndexer` inside the QVAC node parses these files at startup (and refreshes when the directory changes), building an in-memory index for search and link-graph queries.

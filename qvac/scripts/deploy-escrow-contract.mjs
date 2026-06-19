@@ -49,7 +49,7 @@ async function deploy() {
   header.chainName = CHAIN_NAME;
 
   const session = ExecutableDeployItem.newModuleBytes(wasmBytes, args);
-  const payment = ExecutableDeployItem.standardPayment('500000000000');
+  const payment = ExecutableDeployItem.standardPayment('50000000000');
   const deploy = Deploy.makeDeploy(header, payment, session);
   deploy.sign(privateKey);
 
