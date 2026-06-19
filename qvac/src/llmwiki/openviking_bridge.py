@@ -17,13 +17,18 @@ import os
 import urllib.request
 import urllib.error
 
-DEFAULT_URL = os.environ.get("OPENVIKING_URL", "http://localhost:1933")
+DEFAULT_URL = os.environ.get("OPENVIKING_URL", "http://127.0.0.1:1933")
+API_KEY = os.environ.get("OPENVIKING_API_KEY", "chimera-local-dev-key")
 
 
 def _request(method: str, path: str, payload: dict | None = None) -> dict:
     url = f"{DEFAULT_URL.rstrip('/')}{path}"
     data = json.dumps(payload).encode("utf-8") if payload else None
-    headers = {"Content-Type": "application/json", "Accept": "application/json"}
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "X-API-Key": API_KEY,
+    }
     req = urllib.request.Request(url, data=data, headers=headers, method=method)
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
