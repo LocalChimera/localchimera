@@ -144,3 +144,15 @@ qvac-chimera/
 └── README.md
 ```
 
+## Upstream Projects
+
+Chimera builds on several open-source projects. See [docs/UPSTREAM.md](docs/UPSTREAM.md) for:
+- Full catalog of upstream dependencies (QVAC SDK, Pear, Tauri, Capacitor, LLMwiki, Openviking, OtterWiki)
+- How to check for and apply updates
+- Version tracking matrix
+
+Quick check:
+```bash
+./scripts/update-upstream.sh check
+```
+
