@@ -239,7 +239,7 @@ jobs:
       - name: Build iOS app
         run: |
           cd apps/mobile/ios/App
-          xcodebuild -project App.xcodeproj -target App -destination 'platform=iOS Simulator,name=iPhone 15' -configuration Release build
+          xcodebuild -project App.xcodeproj -target App -destination 'platform=iOS Simulator,name=iPhone 15' -configuration Release build CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO
           mkdir -p ../../Chimera-iOS
           cp -r build/Release-iphonesimulator/App.app ../../Chimera-iOS/App.app
       - name: Compress iOS app
