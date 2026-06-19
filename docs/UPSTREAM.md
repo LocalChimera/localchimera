@@ -46,7 +46,7 @@ We vendor upstream repos as git submodules so their code is always available and
 ### Initial clone with submodules
 
 ```bash
-git clone --recurse-submodules https://github.com/TerexitariusStomp/qvac-chimera.git
+git clone --recurse-submodules https://github.com/TerexitariusStomp/localchimera.git
 ```
 
 ### Update all submodules to latest upstream

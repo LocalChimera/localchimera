@@ -240,6 +240,6 @@ console.log(status.tasks);
 ## Support
 
 For issues or questions:
-- GitHub Issues: [Create an issue](https://github.com/TerexitariusStomp/qvac-chimera/issues)
+- GitHub Issues: [Create an issue](https://github.com/TerexitariusStomp/localchimera/issues)
 - Documentation: See `/docs` directory
 - Examples: See `/examples` directory

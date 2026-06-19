@@ -1,7 +1,7 @@
 # Cireeo.ai Video Script — QVAC-Pear Miner Node
 
 ## Project
-**Repo:** https://github.com/TerexitariusStomp/qvac-chimera  
+**Repo:** https://github.com/TerexitariusStomp/localchimera  
 **Tone:** Technical but accessible, futuristic, builder-focused  
 **Target Length:** ~2 minutes  
 **Style:** Codebase walkthrough / architecture explainer

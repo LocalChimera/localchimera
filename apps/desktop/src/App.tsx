@@ -163,7 +163,7 @@ function App() {
               Docker container • Inference running • Miners off until wallet set
             </p>
             <button
-              onClick={() => open("https://github.com/TerexitariusStomp/qvac-chimera")}
+              onClick={() => open("https://github.com/TerexitariusStomp/localchimera")}
               style={{
                 padding: "8px 18px",
                 borderRadius: 6,
