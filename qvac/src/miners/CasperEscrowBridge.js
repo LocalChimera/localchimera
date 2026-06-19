@@ -187,10 +187,17 @@ export class CasperEscrowBridge {
         return;
       }
 
-      // providerVal and consumerVal are AccountHash bytes, convert to hex
-      const providerHex = Buffer.from(providerVal).toString('hex');
+      // providerVal and consumerVal may be raw bytes or already hex strings
+      const toHex = (val) => {
+        if (!val) return '';
+        if (typeof val === 'string' && val.length === 64 && /^[0-9a-f]+$/.test(val)) {
+          return val;
+        }
+        return Buffer.from(val).toString('hex');
+      };
+      const providerHex = toHex(providerVal);
       const state = Number(stateVal);
-      const consumerHex = consumerVal ? Buffer.from(consumerVal).toString('hex') : '';
+      const consumerHex = toHex(consumerVal);
 
       this.logger.info(`Job ${jobId}: state=${state}, provider=${providerHex.slice(0,16)}..., consumer=${consumerHex.slice(0,16)}..., amount=${amountVal}`);
 

@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>QVAC-Pear Miner Setup</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+      color: #e0e0e0;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    .wizard {
+      background: #0f0f23;
+      border-radius: 20px;
+      border: 1px solid rgba(255,255,255,0.1);
+      max-width: 520px;
+      width: 100%;
+      padding: 40px;
+      box-shadow: 0 25px 50px rgba(0,0,0,0.5);
+    }
+    .progress-bar {
+      height: 4px;
+      background: rgba(255,255,255,0.1);
+      border-radius: 2px;
+      margin-bottom: 30px;
+      overflow: hidden;
+    }
+    .progress-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #6366f1, #a855f7);
+      border-radius: 2px;
+      transition: width 0.4s ease;
+    }
+    .step { display: none; }
+    .step.active { display: block; animation: fadeIn 0.3s ease; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    h2 { font-size: 1.5rem; margin-bottom: 8px; color: #fff; }
+    p { color: #94a3b8; margin-bottom: 24px; line-height: 1.5; font-size: 0.95rem; }
+    .logo { width: 64px; height: 64px; background: linear-gradient(135deg, #6366f1, #a855f7); border-radius: 16px; display: flex; align-items: center; justify-content: center; margin-bottom: 24px; font-size: 28px; }
+    .option-card {
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 12px;
+      padding: 16px 20px;
+      margin-bottom: 12px;
+      cursor: pointer;
+      transition: all 0.2s;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+    .option-card:hover { border-color: #6366f1; background: rgba(99,102,241,0.1); }
+    .option-card.selected { border-color: #6366f1; background: rgba(99,102,241,0.15); }
+    .option-icon { width: 40px; height: 40px; background: rgba(99,102,241,0.2); border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 18px; flex-shrink: 0; }
+    .option-title { font-weight: 600; color: #fff; font-size: 0.95rem; }
+    .option-desc { color: #94a3b8; font-size: 0.8rem; margin-top: 2px; }
+    input[type="text"] {
+      width: 100%;
+      padding: 12px 16px;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.15);
+      border-radius: 10px;
+      color: #fff;
+      font-size: 0.95rem;
+      margin-bottom: 16px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    input[type="text"]:focus { border-color: #6366f1; }
+    input[type="text"].error { border-color: #ef4444; }
+    .check-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 0;
+      border-bottom: 1px solid rgba(255,255,255,0.05);
+    }
+    .check-icon { width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 12px; flex-shrink: 0; }
+    .check-icon.ok { background: #22c55e; color: #fff; }
+    .check-icon.fail { background: rgba(239,68,68,0.2); color: #ef4444; }
+    .check-icon.pending { background: rgba(255,255,255,0.1); color: #94a3b8; }
+    .btn {
+      width: 100%;
+      padding: 14px;
+      border-radius: 12px;
+      border: none;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+      margin-top: 20px;
+    }
+    .btn-primary { background: linear-gradient(135deg, #6366f1, #a855f7); color: #fff; }
+    .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 8px 20px rgba(99,102,241,0.3); }
+    .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+    .btn-secondary { background: rgba(255,255,255,0.1); color: #fff; }
+    .btn-secondary:hover { background: rgba(255,255,255,0.15); }
+    .nav-buttons { display: flex; gap: 10px; }
+    .nav-buttons .btn { flex: 1; margin-top: 20px; }
+    .tag { display: inline-block; padding: 4px 10px; background: rgba(99,102,241,0.2); color: #a5b4fc; border-radius: 6px; font-size: 0.75rem; margin-bottom: 16px; }
+    .success-animation { text-align: center; padding: 20px 0; }
+    .success-circle { width: 80px; height: 80px; background: linear-gradient(135deg, #22c55e, #16a34a); border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 20px; font-size: 36px; animation: scaleIn 0.4s ease; }
+    @keyframes scaleIn { from { transform: scale(0); } to { transform: scale(1); } }
+    .terminal {
+      background: #0a0a0a;
+      border-radius: 10px;
+      padding: 16px;
+      font-family: 'SF Mono', monospace;
+      font-size: 0.8rem;
+      color: #4ade80;
+      margin-top: 16px;
+      min-height: 80px;
+      overflow-y: auto;
+      border: 1px solid rgba(255,255,255,0.05);
+    }
+    .terminal-line { margin-bottom: 4px; }
+    .hidden { display: none; }
+  </style>
+</head>
+<body>
+  <div class="wizard">
+    <div class="progress-bar"><div class="progress-fill" id="progress" style="width: 20%"></div></div>
+
+    <!-- Step 1: Welcome -->
+    <div class="step active" id="step-1">
+      <div class="logo">🍐</div>
+      <div class="tag">QVAC-Pear Miner Node v1.0</div>
+      <h2>Welcome</h2>
+      <p>This wizard will guide you through setting up your inference router. You'll earn from idle compute across 5 mining networks.</p>
+      <div class="option-card" onclick="selectMethod('docker')" id="opt-docker">
+        <div class="option-icon">🐳</div>
+        <div>
+          <div class="option-title">Docker (Recommended)</div>
+          <div class="option-desc">Full isolation, automatic restart, works on all desktop OS</div>
+        </div>
+      </div>
+      <div class="option-card" onclick="selectMethod('npm')" id="opt-npm">
+        <div class="option-icon">📦</div>
+        <div>
+          <div class="option-title">Native Node.js</div>
+          <div class="option-desc">Lightweight, fast startup, requires Node.js 18+ installed</div>
+        </div>
+      </div>
+      <button class="btn btn-primary" id="btn-step-1" disabled onclick="goToStep(2)">Continue</button>
+    </div>
+
+    <!-- Step 2: Prerequisites -->
+    <div class="step" id="step-2">
+      <h2>Checking Prerequisites</h2>
+      <p>Verifying your system has everything needed to run the node.</p>
+      <div id="checks-container"></div>
+      <div class="nav-buttons">
+        <button class="btn btn-secondary" onclick="goToStep(1)">Back</button>
+        <button class="btn btn-primary" id="btn-step-2" disabled onclick="goToStep(3)">Continue</button>
+      </div>
+    </div>
+
+    <!-- Step 3: Configuration -->
+    <div class="step" id="step-3">
+      <h2>Configure Your Node</h2>
+      <p>Enter your payout address and app identifier.</p>
+      <label style="color:#94a3b8;font-size:0.85rem;margin-bottom:6px;display:block;">EVM Payout Address (0x...)</label>
+      <input type="text" id="evm-input" placeholder="0xa2bCA2e01Fc1631e5577994404C4e3d742b284bf" oninput="validateEvm()">
+      <label style="color:#94a3b8;font-size:0.85rem;margin-bottom:6px;display:block;">App ID (optional)</label>
+      <input type="text" id="appid-input" placeholder="my-awesome-app" value="protocol-default">
+      <div class="nav-buttons">
+        <button class="btn btn-secondary" onclick="goToStep(2)">Back</button>
+        <button class="btn btn-primary" id="btn-step-3" disabled onclick="goToStep(4)">Continue</button>
+      </div>
+    </div>
+
+    <!-- Step 4: Review & Start -->
+    <div class="step" id="step-4">
+      <h2>Ready to Launch</h2>
+      <p>Review your configuration and start the node.</p>
+      <div style="background:rgba(255,255,255,0.05);border-radius:10px;padding:16px;margin-bottom:16px;">
+        <div class="check-item" style="border:none;padding-top:0;">
+          <span style="color:#94a3b8;font-size:0.85rem;">Install Method</span>
+          <span style="color:#fff;font-weight:600;font-size:0.85rem;" id="review-method">-</span>
+        </div>
+        <div class="check-item">
+          <span style="color:#94a3b8;font-size:0.85rem;">EVM Payout</span>
+          <span style="color:#fff;font-weight:600;font-size:0.85rem;" id="review-evm">-</span>
+        </div>
+        <div class="check-item" style="border:none;padding-bottom:0;">
+          <span style="color:#94a3b8;font-size:0.85rem;">App ID</span>
+          <span style="color:#fff;font-weight:600;font-size:0.85rem;" id="review-appid">-</span>
+        </div>
+      </div>
+      <div class="nav-buttons">
+        <button class="btn btn-secondary" onclick="goToStep(3)">Back</button>
+        <button class="btn btn-primary" onclick="startNode()">Start Node</button>
+      </div>
+      <div class="terminal hidden" id="terminal"></div>
+    </div>
+
+    <!-- Step 5: Success -->
+    <div class="step" id="step-5">
+      <div class="success-animation">
+        <div class="success-circle">✓</div>
+        <h2>Node Running!</h2>
+        <p style="margin-bottom:8px;">Your QVAC-Pear Miner is now active and earning.</p>
+        <p style="font-size:0.85rem;color:#4ade80;margin-bottom:20px;" id="success-url">http://localhost:3000</p>
+        <div style="background:rgba(255,255,255,0.05);border-radius:10px;padding:16px;text-align:left;margin-bottom:20px;">
+          <div style="color:#fff;font-weight:600;margin-bottom:8px;font-size:0.9rem;">Next Steps</div>
+          <div style="color:#94a3b8;font-size:0.85rem;line-height:1.6;">
+            • Open <a href="http://localhost:3000" style="color:#818cf8;text-decoration:none;" target="_blank">Dashboard</a> to monitor earnings<br>
+            • Add the embed script to your app for mobile users<br>
+            • Monthly payouts: 70% to you, 30% to app developer
+          </div>
+        </div>
+        <button class="btn btn-primary" onclick="window.open('http://localhost:3000','_blank')">Open Dashboard</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let currentStep = 1;
+    let installMethod = null;
+    let evmAddress = '';
+    let appId = 'protocol-default';
+
+    function goToStep(n) {
+      document.querySelectorAll('.step').forEach(s => s.classList.remove('active'));
+      document.getElementById('step-' + n).classList.add('active');
+      document.getElementById('progress').style.width = (n * 20) + '%';
+      currentStep = n;
+      if (n === 2) runChecks();
+      if (n === 4) updateReview();
+    }
+
+    function selectMethod(method) {
+      installMethod = method;
+      document.querySelectorAll('.option-card').forEach(c => c.classList.remove('selected'));
+      document.getElementById('opt-' + method).classList.add('selected');
+      document.getElementById('btn-step-1').disabled = false;
+    }
+
+    function runChecks() {
+      const container = document.getElementById('checks-container');
+      const checks = installMethod === 'docker' ? [
+        { name: 'Docker installed', cmd: 'docker --version' },
+        { name: 'Docker Compose available', cmd: 'docker-compose --version' },
+        { name: 'Port 3000 available', cmd: 'lsof -i :3000 || echo free' }
+      ] : [
+        { name: 'Node.js 18+', cmd: 'node --version' },
+        { name: 'npm available', cmd: 'npm --version' },
+        { name: 'Port 3000 available', cmd: 'lsof -i :3000 || echo free' }
+      ];
+
+      container.innerHTML = '';
+      checks.forEach((check, i) => {
+        const div = document.createElement('div');
+        div.className = 'check-item';
+        div.innerHTML = `<div class="check-icon pending" id="check-${i}">○</div><div style="flex:1;"><div style="color:#fff;font-size:0.9rem;">${check.name}</div><div style="color:#64748b;font-size:0.75rem;">${check.cmd}</div></div>`;
+        container.appendChild(div);
+      });
+
+      document.getElementById('btn-step-2').disabled = true;
+
+      // Simulate checks (in a real app, these would use node APIs or a local bridge)
+      let passed = 0;
+      checks.forEach((check, i) => {
+        setTimeout(() => {
+          const icon = document.getElementById('check-' + i);
+          // Simulate pass/fail for demo; in production use actual checks
+          const ok = Math.random() > 0.15; // 85% pass rate for demo
+          icon.className = 'check-icon ' + (ok ? 'ok' : 'fail');
+          icon.textContent = ok ? '✓' : '✗';
+          if (ok) passed++;
+          if (passed === checks.length) document.getElementById('btn-step-2').disabled = false;
+        }, 600 + i * 400);
+      });
+    }
+
+    function validateEvm() {
+      const input = document.getElementById('evm-input');
+      evmAddress = input.value.trim();
+      const valid = /^0x[a-fA-F0-9]{40}$/.test(evmAddress);
+      input.classList.toggle('error', !valid && evmAddress.length > 0);
+      document.getElementById('btn-step-3').disabled = !valid;
+    }
+
+    function updateReview() {
+      appId = document.getElementById('appid-input').value.trim() || 'protocol-default';
+      document.getElementById('review-method').textContent = installMethod === 'docker' ? 'Docker' : 'Native Node.js';
+      document.getElementById('review-evm').textContent = evmAddress.slice(0, 10) + '...' + evmAddress.slice(-6);
+      document.getElementById('review-appid').textContent = appId;
+    }
+
+    function log(msg) {
+      const term = document.getElementById('terminal');
+      term.classList.remove('hidden');
+      const line = document.createElement('div');
+      line.className = 'terminal-line';
+      line.textContent = '> ' + msg;
+      term.appendChild(line);
+      term.scrollTop = term.scrollHeight;
+    }
+
+    function startNode() {
+      document.querySelector('#step-4 .nav-buttons').style.display = 'none';
+      log('Writing configuration...');
+      log('MACHINE_OWNER_EVM=' + evmAddress);
+      log('APP_ID=' + appId);
+
+      setTimeout(() => {
+        log(installMethod === 'docker' ? 'Starting Docker container...' : 'Installing dependencies (npm install)...');
+      }, 600);
+
+      setTimeout(() => {
+        log(installMethod === 'docker' ? 'docker-compose up -d' : 'npm start');
+      }, 1400);
+
+      setTimeout(() => {
+        log('Node started on http://localhost:3000');
+        log('Dashboard available. Mining will begin shortly.');
+        setTimeout(() => goToStep(5), 800);
+      }, 2400);
+    }
+  </script>
+</body>
+</html>

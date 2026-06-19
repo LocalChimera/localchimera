@@ -1,0 +1,23 @@
+{
+	"appId": "io.chimera.mobile",
+	"appName": "Chimera",
+	"webDir": "dist",
+	"bundledWebRuntime": false,
+	"server": {
+		"androidScheme": "https",
+		"cleartext": false
+	},
+	"plugins": {
+		"SplashScreen": {
+			"launchShowDuration": 2000,
+			"launchAutoHide": true,
+			"backgroundColor": "#0a0a14",
+			"androidSplashResourceName": "splash",
+			"androidScaleType": "CENTER_CROP"
+		}
+	},
+	"android": {},
+	"ios": {
+		"contentInset": "always"
+	}
+}

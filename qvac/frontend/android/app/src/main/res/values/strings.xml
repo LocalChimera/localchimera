@@ -1,7 +1,0 @@
-<?xml version='1.0' encoding='utf-8'?>
-<resources>
-    <string name="app_name">Chimera</string>
-    <string name="title_activity_main">Chimera</string>
-    <string name="package_name">io.chimera.mobile</string>
-    <string name="custom_url_scheme">io.chimera.mobile</string>
-</resources>
