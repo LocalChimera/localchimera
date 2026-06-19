@@ -133,11 +133,13 @@ async function callInference(node, jobId, requestHash) {
       throw new Error(`HTTP ${res.status}: ${await res.text()}`);
     }
     const data = await res.json();
-    // The ai-write endpoint returns { success, data: { id, title, body, ... } }
-    const payload = data.data || data;
-    const body = payload.body || payload.output || payload.result || '';
+    // The inference endpoint returns { output: "...", model: "...", success: true }
+    const body = data.output || data.body || data.result || '';
     const responseHash = hashString(body || JSON.stringify(data));
     console.log(`[router] ${node.id} returned ${body.length} chars, hash: ${responseHash}`);
+    // Cache full text for frontend display
+    inferenceCache.set(jobId, { text: body, timestamp: Date.now() });
+    console.log(`[router] Cached result for ${jobId} (${body.length} chars)`);
     return { success: true, responseHash };
   } catch (e) {
     console.error(`[router] ${node.id} failed: ${e.message}`);
@@ -249,6 +251,41 @@ async function pollAndRoute() {
     console.error('[router] Error:', e.message);
   }
 }
+
+// Inference result cache: jobId -> { text, timestamp }
+const inferenceCache = new Map();
+
+// Start lightweight result server for frontend queries
+import { createServer } from 'http';
+const RESULT_PORT = 3006;
+createServer(async (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
+  if (req.method !== 'GET') { res.writeHead(405); res.end('Method not allowed'); return; }
+
+  const url = new URL(req.url, `http://localhost:${RESULT_PORT}`);
+  if (url.pathname === '/result') {
+    const jobId = url.searchParams.get('job_id');
+    const entry = inferenceCache.get(jobId);
+    if (entry) {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ jobId, text: entry.text, timestamp: entry.timestamp }));
+    } else {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Result not found', jobId }));
+    }
+    return;
+  }
+  if (url.pathname === '/health') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ ok: true, cached: inferenceCache.size }));
+    return;
+  }
+  res.writeHead(404); res.end('Not found');
+}).listen(RESULT_PORT, () => {
+  console.log(`[router] Result cache server: http://localhost:${RESULT_PORT}/result?job_id=...`);
+});
 
 async function main() {
   console.log('=== Job Router / Dispatcher ===');

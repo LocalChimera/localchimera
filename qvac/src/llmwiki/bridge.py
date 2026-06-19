@@ -225,7 +225,7 @@ def create_wiki_page(
 
     writer = WikiWriter(workspace, category)
     try:
-        concept_id = f"{args.category}/{_sanitize_filename(title)}"
+        concept_id = f"{category}/{_sanitize_filename(title)}"
         doc_id = writer.write(title, _build_frontmatter(concept_id, title, desc, effective_tags) + body, effective_tags)
     finally:
         writer.close()

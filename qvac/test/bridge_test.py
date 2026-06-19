@@ -28,7 +28,7 @@ def test_sanitize_filename_fallback():
     assert _sanitize_filename("") == "page"
 
 def test_build_frontmatter_contains_title():
-    fm = _build_frontmatter("My Topic", "A description", ["tag1"])
+    fm = _build_frontmatter("my-topic", "My Topic", "A description", ["tag1"])
     assert "title: My Topic" in fm
     assert "tag1" in fm
 
