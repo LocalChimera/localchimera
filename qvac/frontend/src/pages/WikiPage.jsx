@@ -537,6 +537,45 @@ export default function WikiPage({ onBack }) {
     }
   };
 
+  const docAIAction = async (instruction, type = 'append') => {
+    setAiLoading(true);
+    setSaveStatus('Processing...');
+    try {
+      const prompt = `${instruction}\n\nDocument:\n${editorText}`;
+      const res = await fetch(`${API_BASE}/ai-write`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt })
+      });
+      const json = await res.json();
+      if (json.success) {
+        const result = json.data.body.trim();
+        if (type === 'replace') {
+          setEditorText(result);
+          setSaveStatus('Done!');
+          setTimeout(() => setSaveStatus(''), 1500);
+        } else if (type === 'append') {
+          setEditorText(prev => {
+            const sep = prev.trim().length > 0 ? '\n\n---\n\n' : '';
+            return prev + sep + result;
+          });
+          setSaveStatus('Done!');
+          setTimeout(() => setSaveStatus(''), 1500);
+        } else if (type === 'analyze') {
+          setAnalysis(result);
+          setSaveStatus('');
+        }
+      } else {
+        setSaveStatus('Failed');
+      }
+    } catch (e) {
+      console.error(e);
+      setSaveStatus('Failed');
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
   // ─── Autoresearch ───
   const startAutoresearch = () => {
     if (!autoTopic.trim()) return;

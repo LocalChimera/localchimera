@@ -84,9 +84,9 @@
       "config": {
         "network": "bittensor",
         "platform": "https://chutes.ai",
-        "walletAddress": "5GLC1oKLPWXrXgbT7DdK2BWdiZjLCjRSFtjiJHNDjnG5mGNz",
-        "hotkeyAddress": "5GLC1oKLPWXrXgbT7DdK2BWdiZjLCjRSFtjiJHNDjnG5mGNz",
-        "apiKey": "",
+        "walletAddress": "5HpiVFL9wf5AYNGeMX2FVP4YALBe9izT8Ueds2p81p2Vf3QP",
+        "hotkeyAddress": "adc237b4439c45325e05e9e2f4af838fec08e4e1c5f39c9a",
+        "apiKey": "cpk_f2beb2d6f2b64a0ba97df0664c7b82aa.006884d0dea8506b893db0dd9766214c.NWQ0DPePVHzWJivJhpgOiRcdpvz5EdGU",
         "apiBaseUrl": "https://api.chutes.ai",
         "inferenceBaseUrl": "https://llm.chutes.ai/v1",
         "chutesHome": "~/.chutes",
