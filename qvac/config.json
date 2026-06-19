@@ -86,7 +86,7 @@
         "npub": "npub1f60vyl802rs2nt8n3lrw89jq9xt6rqzuw8ddxz0vwdqwm8v3xk5sgj9aef",
         "name": "Chimera-Routstr-Node",
         "description": "QVAC-Chimera decentralized AI inference node",
-        "receiveLnAddress": "",
+        "receiveLnAddress": "happinesssuperb162013@getalby.com",
         "adminPassword": "chimera-routstr-admin",
         "apiPort": 8000,
         "autoFundSweep": true

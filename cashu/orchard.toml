@@ -1,77 +1,24 @@
 # Orchard Cashu Mint Configuration
+# Production — real Bitcoin backend
 # Docs: https://github.com/cashubtc/orchard
-#
-# ═══════════════════════════════════════════════════════════════
-# GETTING PAID FOR REAL
-# ═══════════════════════════════════════════════════════════════
-# There are two ways to earn real Bitcoin with this setup:
-#
-# 1) GREENLIGHT (RECOMMENDED — easiest real Lightning backend)
-#    - Sign up at https://greenlight.blockstream.com
-#    - Get device credentials (device.crt + device-key.pem)
-#    - Place them in cashu/greenlight/ and set backend = "greenlight"
-#    - No Bitcoin node needed. Blockstream hosts the Lightning node.
-#    - This lets your Cashu mint issue/redeem real eCash tokens.
-#
-# 2) EXTERNAL LIGHTNING ADDRESS (simplest — just for Routstr payouts)
-#    - Keep backend = "fakewallet" (test mode, no real sats via mint)
-#    - Set RECEIVE_LN_ADDRESS in ~/.routstr/.env to a real Lightning address
-#    - Clients still pay via Cashu, but the mint only issues test tokens.
-#    - To make the mint real, you MUST use option 1.
-#
-# ═══════════════════════════════════════════════════════════════
 
 [mint]
-# Public URL where the mint is reachable
-# Change this to your domain or public IP when deployed
 url = "http://localhost:3338"
-
-# Mint name shown in wallets
 name = "Chimera-Cashu-Mint"
-
-# Description
 description = "QVAC-Chimera self-hosted Cashu eCash mint"
-
-# Contact (NOSTR npub or email)
 contact = "npub1f60vyl802rs2nt8n3lrw89jq9xt6rqzuw8ddxz0vwdqwm8v3xk5sgj9aef"
-
-# Supported nuts (protocol versions)
 nuts = ["nut-04", "nut-05"]
-
-# Fee (satoshis per token)
 fee = 0
 
 [database]
-# Postgres connection
 url = "postgres://cashu:cashu@postgres:5432/orchard"
 
 [lightning]
-# Lightning backend for the mint
-# Options: "lnd", "cln", "greenlight", "fakewallet"
-#
-# fakewallet = test mode, no real sats (for development only)
-# lnd        = Lightning Network Daemon (requires Bitcoin node)
-# cln        = Core Lightning (requires Bitcoin node)
-# greenlight = Blockstream Greenlight (hosted, no Bitcoin node needed)
-backend = "fakewallet"
+# Real Lightning backend via Blockstream Greenlight
+# Sign up: https://greenlight.blockstream.com
+# Place device.crt and device-key.pem in cashu/greenlight/
+backend = "greenlight"
 
-# ═══ LND (requires self-hosted Bitcoin node + LND) ═══
-# Uncomment below if you run your own LND node.
-# [lnd]
-# host = "lnd:10009"
-# macaroon_path = "/app/lnd/admin.macaroon"
-# tls_cert_path = "/app/lnd/tls.cert"
-
-# ═══ Core Lightning (requires self-hosted Bitcoin node + CLN) ═══
-# Uncomment below if you run your own Core Lightning node.
-# [cln]
-# rpc_path = "/app/cln/lightning-rpc"
-
-# ═══ Greenlight (RECOMMENDED — hosted by Blockstream) ═══
-# 1. Sign up at https://greenlight.blockstream.com
-# 2. Create a node, download device.crt and device-key.pem
-# 3. Place them in the cashu/greenlight/ directory
-# 4. Uncomment below and set backend = "greenlight" above
-# [greenlight]
-# device_cert_path = "/app/greenlight/device.crt"
-# device_key_path  = "/app/greenlight/device-key.pem"
+[greenlight]
+device_cert_path = "/app/greenlight/device.crt"
+device_key_path  = "/app/greenlight/device-key.pem"

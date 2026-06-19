@@ -35,16 +35,20 @@ This starts:
 - **RoutstrMiner** auto-starts the Routstr container on port 8000
 - **Cashu mint** (when configured) on port 3338
 
-### Step 3 — Configure Cashu Mint (optional, for receiving payments)
+### Step 3 — Configure Cashu Mint for real Bitcoin
 
 Edit `cashu/orchard.toml` and set your Lightning backend:
 
 ```toml
 [lightning]
-backend = "lnd"  # or "cln", "greenlight", or "fakewallet" for testing
+backend = "greenlight"
+
+[greenlight]
+device_cert_path = "/app/greenlight/device.crt"
+device_key_path  = "/app/greenlight/device-key.pem"
 ```
 
-For testing without real Bitcoin, use `backend = "fakewallet"`.
+Sign up at https://greenlight.blockstream.com, download your credentials, and place them in `cashu/greenlight/`.
 
 Start the mint:
 ```bash
@@ -73,10 +77,8 @@ Recommended wallets:
 
 1. Open the wallet app
 2. Add mint: `http://localhost:3338`
-3. Mint tokens (if using fakewallet, tokens have no real value — for testing only)
-4. Your wallet balance is stored locally in the app
-
-For **real Bitcoin** payouts, configure a Lightning backend in `orchard.toml`.
+3. Deposit real sats via Lightning
+4. Your wallet balance is stored locally in the app as eCash tokens
 
 ## Architecture
 
@@ -124,7 +126,7 @@ This runs inference through the local QVAC SDK — no external API calls.
 | `docker not available` | Install Docker Desktop or Docker Engine |
 | `Compose dir missing` | Ensure `routstr/docker-compose.yml` exists |
 | `Inference not working` | Make sure Chimera node is running on port 3002 |
-| `No earnings` | Configure Lightning backend in `cashu/orchard.toml` |
+| `No earnings` | Configure Greenlight in `cashu/orchard.toml` and set `RECEIVE_LN_ADDRESS` |
 | `Not in discovery` | Check Nostr relay connections in dashboard |
 | `Cannot reach Chimera from Routstr` | Verify `host.docker.internal` resolves in container |
 
