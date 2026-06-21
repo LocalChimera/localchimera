@@ -19,6 +19,7 @@
     "tinyld": "^1.2.0",
     "expo-file-system": "~18.0.0",
     "expo-keep-awake": "~14.0.0",
+    "expo-device": "~6.0.0",
     "react-native-webview": "13.12.5"
   },
   "devDependencies": {
