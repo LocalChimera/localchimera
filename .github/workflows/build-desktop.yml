@@ -281,10 +281,13 @@ jobs:
         run: |
           cd apps/mobile-expo
           npx expo prebuild --platform android --clean
+      - name: Patch Kotlin version in build.gradle
+        run: |
+          sed -i "s/kotlinVersion = '1.9.24'/kotlinVersion = '1.9.25'/g" apps/mobile-expo/android/build.gradle
+          grep -i kotlinVersion apps/mobile-expo/android/build.gradle || true
       - name: Set Gradle Java home
         run: |
           echo "org.gradle.java.home=$JAVA_HOME" >> apps/mobile-expo/android/gradle.properties
-          echo "android.kotlinVersion=1.9.25" >> apps/mobile-expo/android/gradle.properties
       - name: Build Expo APK
         run: |
           cd apps/mobile-expo/android
