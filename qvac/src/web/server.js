@@ -187,11 +187,6 @@ Copy the topic hex and invite others to join.
       this.server.close();
     }
     
-    if (this.relay) {
-      await this.relay.stop();
-      this.logger.info('Relay server stopped');
-    }
-    
     this.logger.info('Web server stopped');
   }
   
@@ -484,7 +479,6 @@ Copy the topic hex and invite others to join.
 
     try {
       this.logger.info(`[markitdown] Converting ${filePart.filename} via upstream/microsoft-markitdown...`);
-      const { spawn } = await import('child_process');
       // Use upstream markitdown as a Python module (installed from submodule)
       const py = spawn('/usr/bin/python3', ['-m', 'markitdown', tmpPath], { timeout: 60000 });
 
