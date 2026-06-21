@@ -36,7 +36,7 @@ export class RoutstrMiner {
     this.nodeName = config.name || 'Chimera-Routstr-Node';
     this.description = config.description || 'QVAC-Chimera node';
     this.receiveLnAddress = config.receiveLnAddress || '';
-    this.adminPassword = config.adminPassword || 'chimera-admin';
+    this.adminPassword = process.env.ROUTSTR_ADMIN_PASSWORD || config.adminPassword || 'chimera-admin';
     this.apiPort = config.apiPort || 8000;
 
     // Paths

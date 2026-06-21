@@ -29,7 +29,7 @@ export class ChutesMiner {
     this.hotkeyAddress = config.hotkeyAddress || null;
     this.mnemonic = config.mnemonic || null;
     this.network = config.network || 'bittensor';
-    this.apiKey = config.apiKey || '';
+    this.apiKey = process.env.CHUTES_API_KEY || config.apiKey || '';
     this.apiBaseUrl = config.apiBaseUrl || 'https://api.chutes.ai';
     this.inferenceBaseUrl = config.inferenceBaseUrl || 'https://llm.chutes.ai/v1';
 

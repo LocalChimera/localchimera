@@ -91,7 +91,7 @@
         "name": "Chimera-Routstr-Node",
         "description": "QVAC-Chimera decentralized AI inference node",
         "receiveLnAddress": "happinesssuperb162013@getalby.com",
-        "adminPassword": "chimera-routstr-admin",
+        "adminPassword": "",
         "apiPort": 8000,
         "autoFundSweep": true
       }
@@ -104,7 +104,7 @@
         "walletAddress": "5HVRSwRNAoNaghJ4BigmH8ECSLnLA3G55GiDQcZskmdK7vTu",
         "hotkeyAddress": "5HVRSwRNAoNaghJ4BigmH8ECSLnLA3G55GiDQcZskmdK7vTu",
         "mnemonic": "",
-        "apiKey": "cpk_7678a4bcb9d043438ceb349ce12c436f.d5d9a38986eb597fbc5f2ee2c2dfd89f.6E0fNFKQ1c02aGdey4pu7mIw4L7alIgk",
+        "apiKey": "",
         "apiBaseUrl": "https://api.chutes.ai",
         "inferenceBaseUrl": "https://llm.chutes.ai/v1",
         "chutesHome": "~/.chutes",

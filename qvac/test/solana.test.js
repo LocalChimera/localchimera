@@ -1,47 +1,81 @@
 /**
- * Unit tests for SolanaMiner.
+ * EarnidleMiner — Solana SPL wallet tests.
+ *
+ * Earnidle is the only Solana miner. It holds the project's shared Solana SPL
+ * collection address; funds sweep weekly into the EVM multisig for monthly
+ * distribution to each machine operator's EVM address.
+ *
  * Run: node --test test/solana.test.js
  */
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { SolanaMiner } from '../src/miners/SolanaMiner.js';
+import { EarnidleMiner } from '../src/miners/EarnidleMiner.js';
 
-describe('SolanaMiner', () => {
-  it('derives deterministic multisig from EVM address', () => {
-    const miner = new SolanaMiner({
-      network: 'solana', multisigType: 'spl-multisig',
-    }, null, '0xa2bCA2e01Fc1631e5577994404C4e3d742b284bf');
-    const addr = miner.deriveMultisigAddress(miner.evmAddress);
-    assert.ok(typeof addr === 'string');
-    assert.ok(addr.length >= 32 && addr.length <= 44, `Address length ${addr.length} not in Solana range`);
-    assert.ok(/^[1-9A-HJ-NP-Za-km-z]+$/.test(addr), 'Not valid base58 chars');
+const VALID_ADDR = '4R5d695FM5AiVjTkbadrjU4wr9ayK7ajeMdqgLd9muQA';
+
+describe('EarnidleMiner — Solana wallet', () => {
+  it('accepts a valid 44-char base58 Solana address', () => {
+    const m = new EarnidleMiner({ walletAddress: VALID_ADDR });
+    assert.ok(m.validateWalletAddress(VALID_ADDR));
   });
 
-  it('multisig is deterministic (same EVM -> same Solana)', () => {
-    const evm = '0xa2bCA2e01Fc1631e5577994404C4e3d742b284bf';
-    const a = new SolanaMiner({ network: 'solana', multisigType: 'spl-multisig' }, null, evm);
-    const b = new SolanaMiner({ network: 'solana', multisigType: 'spl-multisig' }, null, evm);
-    assert.equal(a.deriveMultisigAddress(evm), b.deriveMultisigAddress(evm));
+  it('accepts a valid 32-char base58 Solana address', () => {
+    const m = new EarnidleMiner({});
+    assert.ok(m.validateWalletAddress('11111111111111111111111111111112'));
   });
 
-  it('validates Solana wallet address', () => {
-    const miner = new SolanaMiner({});
-    assert.ok(miner.validateWalletAddress('6ovcKVxdNHH1LradUS8T5gmYiYUGQPW8xtPhfp9ZhPXw'));
-    assert.ok(!miner.validateWalletAddress('bad'));
-    assert.ok(!miner.validateWalletAddress(''));
+  it('rejects addresses that are too short', () => {
+    const m = new EarnidleMiner({});
+    assert.ok(!m.validateWalletAddress('bad'));
+    assert.ok(!m.validateWalletAddress('short123'));
   });
 
-  it('masks addresses', () => {
-    const miner = new SolanaMiner({});
-    assert.equal(miner.maskAddress('6ovcKVxdNHH1LradUS8T5gmYiYUGQPW8xtPhfp9ZhPXw'), '6ovcKV...hPXw');
-    assert.equal(miner.maskAddress(''), '***');
+  it('rejects empty and null inputs', () => {
+    const m = new EarnidleMiner({});
+    assert.ok(!m.validateWalletAddress(''));
+    assert.ok(!m.validateWalletAddress(null));
+    assert.ok(!m.validateWalletAddress(undefined));
   });
 
-  it('status reflects multisig mode', () => {
-    const miner = new SolanaMiner({ network: 'solana', multisigType: 'spl-multisig' }, null, '0xabc');
-    const s = miner.getStatus();
-    assert.equal(s.isMultisig, true);
-    assert.equal(s.network, 'solana');
-    assert.equal(s.stackCompatible, true);
+  it('rejects addresses containing invalid base58 chars (0, O, I, l)', () => {
+    const m = new EarnidleMiner({});
+    assert.ok(!m.validateWalletAddress('0ovcKVxdNHH1LradUS8T5gmYiYUGQPW8xtPhfp9ZhPXw'));
+    assert.ok(!m.validateWalletAddress('OovcKVxdNHH1LradUS8T5gmYiYUGQPW8xtPhfp9ZhPXw'));
+  });
+
+  it('masks address showing first 6 and last 4 chars', () => {
+    const m = new EarnidleMiner({});
+    assert.equal(m.maskAddress(VALID_ADDR), '4R5d69...muQA');
+  });
+
+  it('masks short or empty address as ***', () => {
+    const m = new EarnidleMiner({});
+    assert.equal(m.maskAddress(''), '***');
+    assert.equal(m.maskAddress(null), '***');
+    assert.equal(m.maskAddress('short'), '***');
+  });
+
+  it('stores wallet address and reports walletConfigured correctly', () => {
+    const configured = new EarnidleMiner({ walletAddress: VALID_ADDR });
+    const unconfigured = new EarnidleMiner({});
+    assert.equal(configured.walletAddress, VALID_ADDR);
+    assert.equal(configured.getStatus().walletConfigured, true);
+    assert.equal(unconfigured.getStatus().walletConfigured, false);
+  });
+
+  it('does not make network calls when walletAddress is absent', async () => {
+    const m = new EarnidleMiner({});
+    let fetched = false;
+    const origFetch = global.fetch;
+    global.fetch = async () => { fetched = true; };
+    await m._pollAndRun();
+    global.fetch = origFetch;
+    assert.equal(fetched, false);
+  });
+
+  it('network is solana', () => {
+    const m = new EarnidleMiner({ network: 'solana' });
+    assert.equal(m.network, 'solana');
+    assert.equal(m.getStatus().network, 'solana');
   });
 });
