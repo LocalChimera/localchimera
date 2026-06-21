@@ -45,12 +45,32 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: actions/setup-go@v5
         with: { go-version: "1.21" }
-      - name: Build
+      - name: Build supervisor
         run: |
           cd apps/desktop/supervisor; go build -o supervisor.exe main.go
           mkdir -p ../src-tauri/bin; copy supervisor.exe ../src-tauri/bin/supervisor-x86_64-pc-windows-msvc.exe
-          cd ../../../qvac/frontend; npm install; npm run build
-          cd ../../apps/desktop; npm install; npm run build
+      - name: Build QVAC frontend
+        shell: pwsh
+        run: |
+          cd qvac/frontend
+          for ($i = 1; $i -le 3; $i++) {
+            npm install
+            if ($LASTEXITCODE -eq 0) { break }
+            Write-Host "npm install attempt $i failed, retrying in 10s..."
+            Start-Sleep -Seconds 10
+          }
+          npm run build
+      - name: Build desktop frontend
+        shell: pwsh
+        run: |
+          cd apps/desktop
+          for ($i = 1; $i -le 3; $i++) {
+            npm install
+            if ($LASTEXITCODE -eq 0) { break }
+            Write-Host "npm install attempt $i failed, retrying in 10s..."
+            Start-Sleep -Seconds 10
+          }
+          npm run build
       - name: Copy QVAC to Tauri resources
         shell: cmd
         run: |
