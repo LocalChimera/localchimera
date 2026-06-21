@@ -284,6 +284,7 @@ jobs:
       - name: Set Gradle Java home
         run: |
           echo "org.gradle.java.home=$JAVA_HOME" >> apps/mobile-expo/android/gradle.properties
+          echo "android.kotlinVersion=1.9.25" >> apps/mobile-expo/android/gradle.properties
       - name: Build Expo APK
         run: |
           cd apps/mobile-expo/android
