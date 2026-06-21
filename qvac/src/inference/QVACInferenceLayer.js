@@ -21,6 +21,7 @@ export class QVACInferenceLayer {
     this.qvac = null;
     this.modelId = null;
     this._loading = null;
+    this._activityTimer = null;
   }
 
   async initialize() {
@@ -49,17 +50,18 @@ export class QVACInferenceLayer {
     this.logger.info('Stopping QVAC inference layer...');
     this.isRunning = false;
     this.activeRequests.clear();
+    if (this._activityTimer) { clearInterval(this._activityTimer); this._activityTimer = null; }
     this.logger.info('QVAC inference layer stopped');
   }
 
   startActivityMonitor() {
-    setInterval(() => {
+    this._activityTimer = setInterval(() => {
       const now = Date.now();
       const idleTime = now - this.lastActivity;
       if (idleTime > this.config.idleTimeout) {
         this.logger.debug(`Idle for ${idleTime}ms, ready for mining`);
       }
-    }, 10000);
+    }, 10000).unref();
   }
 
   async _ensureModel() {
