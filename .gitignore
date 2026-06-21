@@ -33,8 +33,6 @@ viral_frames/
 **/*.key
 **/*.pem
 
-# Per-deployment config (contains credentials — use config.example.json as template)
-qvac/config.json
 
 # Backup files
 **/*.bak

@@ -1,0 +1,207 @@
+{
+  "node": {
+    "id": "02b8357bdd44fbb6bd12f2b07cc993ee",
+    "name": "Chimera Mining Node",
+    "version": "1.0.0",
+    "publicUrl": ""
+  },
+  "inference": {
+    "enabled": true,
+    "qvac": {
+      "endpoint": "local",
+      "models": [
+        "llama-3.2-1b-instruct"
+      ],
+      "modelConst": "LLAMA_3_2_1B_INST_Q4_0",
+      "maxConcurrent": 4
+    },
+    "localLLM": {
+      "model": "llama-3.2-1b-instruct",
+      "qvacModelConst": "LLAMA_3_2_1B_INST_Q4_0",
+      "timeout": 300000
+    },
+    "embedding": {
+      "model": "EMBEDDINGGEMMA_300M_Q4_0",
+      "qvacModelConst": "EMBEDDINGGEMMA_300M_Q4_0",
+      "device": "cpu",
+      "workspace": "chimera-rag"
+    },
+    "idleTimeout": 300000
+  },
+  "miners": {
+    "enabled": true,
+    "parallelMode": true,
+    "priority": [
+      "cortensor",
+      "routstr",
+      "chutes",
+      "fortytwo",
+      "earnidle"
+    ],
+    "switchInterval": 60000,
+    "cortensor": {
+      "enabled": true,
+      "note": "Cortensor network miner.",
+      "config": {
+        "network": "arbitrum",
+        "walletAddress": "",
+        "protocolAddress": "",
+        "cortensorHome": "~/.cortensor",
+        "envFile": "~/.cortensor/.env",
+        "cortensordPath": "",
+        "autoFundSweep": true
+      }
+    },
+    "fortytwo": {
+      "enabled": true,
+      "config": {
+        "network": "evm",
+        "platform": "https://fortytwo.network",
+        "walletAddress": "",
+        "protocolAddress": "",
+        "nodeName": "Chimera-Fortytwo-Node",
+        "apiBase": "https://node.fortytwo.network/api",
+        "inferenceUrl": "",
+        "pollInterval": 120000,
+        "fortytwoHome": "~/.fortytwo",
+        "autoFundSweep": true
+      }
+    },
+    "earnidle": {
+      "enabled": true,
+      "config": {
+        "network": "solana",
+        "walletAddress": "4R5d695FM5AiVjTkbadrjU4wr9ayK7ajeMdqgLd9muQA",
+        "protocolAddress": "4R5d695FM5AiVjTkbadrjU4wr9ayK7ajeMdqgLd9muQA",
+        "nodeName": "Chimera-IDLE-Inference",
+        "model": "llama-3.2-1b-instruct",
+        "gpuAvailable": false,
+        "pollInterval": 30000,
+        "apiBase": "https://api.earnidle.com",
+        "autoFundSweep": true
+      }
+    },
+    "routstr": {
+      "enabled": true,
+      "config": {
+        "network": "nostr",
+        "platform": "https://routstr.com",
+        "nsec": "nsec12w7583qzhfn67m2kk8zfkzm0lgmmwr4724tkfxsg08sk4jyhcv4sp778za",
+        "npub": "npub1f60vyl802rs2nt8n3lrw89jq9xt6rqzuw8ddxz0vwdqwm8v3xk5sgj9aef",
+        "name": "Chimera-Routstr-Node",
+        "description": "QVAC-Chimera decentralized AI inference node",
+        "receiveLnAddress": "happinesssuperb162013@getalby.com",
+        "adminPassword": "chimera-routstr-admin",
+        "apiPort": 8000,
+        "autoFundSweep": true
+      }
+    },
+    "chutes": {
+      "enabled": true,
+      "config": {
+        "network": "bittensor",
+        "platform": "https://chutes.ai",
+        "walletAddress": "5HVRSwRNAoNaghJ4BigmH8ECSLnLA3G55GiDQcZskmdK7vTu",
+        "hotkeyAddress": "5HVRSwRNAoNaghJ4BigmH8ECSLnLA3G55GiDQcZskmdK7vTu",
+        "mnemonic": "monitor fetch during tide pizza school ecology long nerve library velvet have",
+        "apiKey": "cpk_7678a4bcb9d043438ceb349ce12c436f.d5d9a38986eb597fbc5f2ee2c2dfd89f.6E0fNFKQ1c02aGdey4pu7mIw4L7alIgk",
+        "apiBaseUrl": "https://api.chutes.ai",
+        "inferenceBaseUrl": "https://llm.chutes.ai/v1",
+        "chutesHome": "~/.chutes",
+        "endpoint": ""
+      }
+    },
+    "casper": {
+      "enabled": true,
+      "config": {
+        "network": "casper",
+        "rpcUrl": "https://rpc.mainnet.casper.network/rpc",
+        "providerKeyPem": ""
+      }
+    }
+  },
+  "multisig": {
+    "enabled": true,
+    "machineOwnerAddress": "",
+    "appDeveloperAddress": "",
+    "evmCollectionAddress": "",
+    "revenueSplit": {
+      "machineOwner": 0.7,
+      "appDeveloper": 0.3
+    },
+    "weeklySweep": {
+      "enabled": true,
+      "dayOfWeek": 0,
+      "hour": 0,
+      "minute": 0,
+      "denialWindowHours": 48,
+      "description": "Collects all network funds into EVM collection multisig"
+    },
+    "monthlySweep": {
+      "enabled": true,
+      "dayOfMonth": 1,
+      "hour": 0,
+      "minute": 0,
+      "denialWindowHours": 48,
+      "description": "Distributes from EVM collection multisig to machineOwnerAddress and appDeveloperAddress"
+    },
+    "protocolMultisigs": {
+      "nostr": {
+        "enabled": true,
+        "protocol": "cashu-nip60-p2sh",
+        "address": "",
+        "threshold": 2,
+        "signers": 3
+      },
+      "bittensor": {
+        "enabled": true,
+        "protocol": "substrate-multisig",
+        "address": "",
+        "threshold": 2,
+        "signers": 3
+      },
+      "solana": {
+        "enabled": true,
+        "protocol": "spl-multisig",
+        "address": "",
+        "threshold": 2,
+        "signers": 3
+      }
+    }
+  },
+  "scheduler": {
+    "enabled": true,
+    "nightStart": 20,
+    "nightEnd": 6,
+    "timezone": "UTC"
+  },
+  "swarm": {
+    "enabled": true,
+    "inference": {
+      "enabled": true,
+      "commanderUrl": "",
+      "role": "commander",
+      "workerPollInterval": 5000,
+      "workerRegisterInterval": 30000
+    }
+  },
+  "p2p": {
+    "enabled": true,
+    "pear": {
+      "enabled": true,
+      "discovery": true
+    },
+    "hypercore": {
+      "storage": "./data/hypercore",
+      "replicate": true
+    }
+  },
+  "storage": {
+    "path": "./data",
+    "encryption": true
+  },
+  "auth": {
+    "method": "signin",
+    "required": true
+  }
+}
