@@ -97,7 +97,7 @@ export class EarnidleMiner {
   }
 
   async _sleep(ms) {
-    return new Promise(resolve => { this._pollTimer = setTimeout(resolve, ms); });
+    return new Promise(resolve => { this._pollTimer = setTimeout(resolve, ms).unref(); });
   }
 
   // ─── Poll for job, execute, submit ───

@@ -109,7 +109,7 @@ export class ChutesMiner {
     await this._ensureNodeRegistered();
 
     // Start health ping loop
-    this._healthTimer = setInterval(() => this._heartbeat(), 30_000);
+    this._healthTimer = setInterval(() => this._heartbeat(), 30_000).unref();
 
     this.isRunning = true;
     this.logger.info('Chutes provider started');
