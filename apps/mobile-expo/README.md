@@ -1,6 +1,6 @@
 # Chimera Mobile (Expo)
 
-On-device AI-powered wiki app using `@qvac/sdk` with Bare runtime.
+On-device AI-powered wiki app using `@chimera/sdk` with Bare runtime.
 
 ## Architecture
 

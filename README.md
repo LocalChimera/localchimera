@@ -1,6 +1,6 @@
 # Chimera — Local AI That Earns When Idle
 
-A standalone QVAC inference node running `@qvac/sdk` inside a hardened Docker container. Each device (desktop, mobile) is its own autonomous node — no centralized router, no relay server.
+A standalone QVAC inference node running `@chimera/sdk` inside a hardened Docker container. Each device (desktop, mobile) is its own autonomous node — no centralized router, no relay server.
 
 ## Architecture
 
@@ -60,7 +60,7 @@ sudo dpkg -i apps/desktop/src-tauri/target/release/bundle/deb/Chimera_1.0.0_amd6
 
 ## Quick Start (Mobile — iOS/Android)
 
-The mobile app is a Capacitor-wrapped web app that runs `@qvac/sdk` natively on device. Each phone is a standalone node — no relay, no desktop dependency.
+The mobile app is a Capacitor-wrapped web app that runs `@chimera/sdk` natively on device. Each phone is a standalone node — no relay, no desktop dependency.
 
 ```bash
 cd qvac/frontend
@@ -112,7 +112,7 @@ npx cap open android  # Android Studio → Generate Signed Bundle
 
 - **LLM Wiki** — Opens directly, no landing page. Auto-saves every 2s.
 - **Time-ago indicator** — "Last saved 12s ago" beside Delete button.
-- **QVAC SDK** — `@qvac/sdk` powers all inference (QVAK).
+- **QVAC SDK** — `@chimera/sdk` powers all inference (QVAK).
 - **Standalone** — Each device is its own node. No InferenceRouter, no relay.
 - **Hardened** — Docker container runs as non-root with minimal deps.
 - **P2P** — Pear P2P swarm sync for wiki pages across devices.
