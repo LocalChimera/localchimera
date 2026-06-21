@@ -56,7 +56,9 @@ jobs:
         run: |
           $ErrorActionPreference = 'Continue'
           robocopy qvac apps/desktop/src-tauri/qvac /E /XD node_modules .git target /R:0 /W:0
-          if ($LASTEXITCODE -ge 8) { exit 1 }
+          $rc = $LASTEXITCODE
+          if ($rc -ge 8) { exit 1 }
+          exit 0
       - name: Tauri build
         uses: tauri-apps/tauri-action@v0
         with:
