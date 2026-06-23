@@ -16,9 +16,6 @@
 [submodule "upstream/knowledge-catalog"]
 	path = upstream/knowledge-catalog
 	url = https://github.com/GoogleCloudPlatform/knowledge-catalog.git
-[submodule "upstream/nosana-kit"]
-	path = upstream/nosana-kit
-	url = https://github.com/nosana-ci/nosana-kit
 [submodule "upstream/heurist-miner-release"]
 	path = upstream/heurist-miner-release
 	url = https://github.com/heurist-network/miner-release
@@ -37,3 +34,6 @@
 [submodule "upstream/byteleap-worker"]
 	path = upstream/byteleap-worker
 	url = https://github.com/byteleapai/byteleap-Worker
+[submodule "upstream/nosana-cli"]
+	path = upstream/nosana-cli
+	url = https://github.com/nosana-ci/nosana-cli
