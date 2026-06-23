@@ -357,7 +357,7 @@
       <p>Every platform runs the same stack. Pick yours and go.</p>
     </div>
     <div class="platforms">
-      <a href="https://github.com/LocalChimera/localchimera/releases/latest" target="_blank" rel="noopener" class="platform">
+      <a href="https://github.com/LocalChimera/localchimera/releases" target="_blank" rel="noopener" class="platform">
         <div class="icon" style="background:rgba(0,229,255,.1);color:#00e5ff">L</div>
         <div>
           <div class="name">Linux</div>
@@ -365,7 +365,7 @@
         </div>
         <div class="arrow">→</div>
       </a>
-      <a href="https://github.com/LocalChimera/localchimera/releases/latest" target="_blank" rel="noopener" class="platform">
+      <a href="https://github.com/LocalChimera/localchimera/releases" target="_blank" rel="noopener" class="platform">
         <div class="icon" style="background:rgba(168,85,247,.1);color:#a855f7">M</div>
         <div>
           <div class="name">macOS</div>
@@ -373,7 +373,7 @@
         </div>
         <div class="arrow">→</div>
       </a>
-      <a href="https://github.com/LocalChimera/localchimera/releases/latest" target="_blank" rel="noopener" class="platform">
+      <a href="https://github.com/LocalChimera/localchimera/releases" target="_blank" rel="noopener" class="platform">
         <div class="icon" style="background:rgba(59,130,246,.1);color:#3b82f6">W</div>
         <div>
           <div class="name">Windows</div>
@@ -389,7 +389,7 @@
         </div>
         <div class="arrow">→</div>
       </a>
-      <a href="https://github.com/LocalChimera/localchimera/releases/latest" target="_blank" rel="noopener" class="platform" data-os="ios">
+      <a href="https://github.com/LocalChimera/localchimera/releases" target="_blank" rel="noopener" class="platform" data-os="ios">
         <div class="icon" style="background:rgba(251,191,36,.1);color:#fbbf24">i</div>
         <div>
           <div class="name">iOS</div>
@@ -397,7 +397,7 @@
         </div>
         <div class="arrow">→</div>
       </a>
-      <a href="https://github.com/LocalChimera/localchimera/releases/latest" target="_blank" rel="noopener" class="platform" data-os="android">
+      <a href="https://github.com/LocalChimera/localchimera/releases" target="_blank" rel="noopener" class="platform" data-os="android">
         <div class="icon" style="background:rgba(251,191,36,.1);color:#fbbf24">A</div>
         <div>
           <div class="name">Android</div>
@@ -545,8 +545,8 @@
     if (!assets || !assets.length) return null;
     const names = assets.map(a => a.name);
     if (os === 'android') {
-      // Prefer per-arch split APKs, then universal APK, then AAB
-      return assets.find(a => /chimera.*arm64.*\.apk$/i.test(a.name))
+      // Prefer per-arch split APKs (arm64-v8a), then other APKs, then AAB
+      return assets.find(a => /arm64.*\.apk$/i.test(a.name))
         || assets.find(a => /chimera.*android.*\.apk$/i.test(a.name))
         || assets.find(a => /android.*\.apk$/i.test(a.name))
         || assets.find(a => a.name.toLowerCase().endsWith('.apk'))
@@ -610,7 +610,7 @@
 
   async function autoDownload() {
     const os = window._chimeraOS || 'unknown';
-    const fallback = 'https://github.com/LocalChimera/localchimera/releases/latest';
+    const fallback = 'https://github.com/LocalChimera/localchimera/releases';
     const btn = document.getElementById('autoDownload');
     const osLabel = document.getElementById('osLabel');
     const originalLabel = osLabel ? osLabel.textContent : 'Download';
