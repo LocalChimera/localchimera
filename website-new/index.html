@@ -672,12 +672,10 @@
 
       const asset = pickAsset(data.assets, os);
       if (asset && asset.browser_download_url) {
-        // Trigger download via hidden <a> tag — more reliable than iframe for cross-origin
+        // Trigger download via hidden <a> tag — no target=_blank so mobile stays on page
         const a = document.createElement('a');
         a.style.display = 'none';
         a.href = asset.browser_download_url;
-        a.target = '_blank';
-        a.rel = 'noopener';
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
