@@ -28,11 +28,11 @@
 - **Can earn?** ❌ No — needs GPU + staked NOS tokens
 
 ### 2. heurist-miner-release (Heurist AI Miner)
-- **Status**: ⚠️ Python packages installed but import fails
-- **Error**: `transformers 5.12.1` API incompatible with `bitsandbytes 0.49.2`
-- **Root cause**: Machine has Python 3.13; heurist pins old versions that don't have
-  pre-built wheels for 3.13. Newer versions break API compatibility.
-- **Fix needed**: Use Python 3.11 venv or downgrade packages to exact pinned versions.
+- **Status**: ✅ Python environment fully working in Python 3.11 venv
+- **Packages**: torch 2.4.0+cpu, diffusers, transformers, web3, and all deps installed
+- **Import test**: ✅ Passes
+- **Miner start**: Reaches wallet validation, then fails because no wallet is configured
+- **Root cause fixed**: Used Python 3.11 venv with exact pinned package versions
 - **Can earn?** ❌ No — needs NVIDIA GPU + zkSync wallet with staked ETH
 
 ### 3. akash-provider (Akash Network Provider)
@@ -45,13 +45,14 @@
 - **Status**: ✅ Go binary built (18 MB)
 - **Local mode**: ✅ IMDS bypass works
 - **Issue**: Without a real gRPC job-queue backend, the worker polls aggressively
-  (97% CPU). Not suitable for sustained background running without a backend.
 - **Can earn?** ❌ No — this is the *job worker*, not the provider node software.
   SaladCloud provider nodes run a proprietary container host.
 
 ### 5. lium-io (Lium Bittensor Subnet 51)
-- **Status**: ⚠️ `compute-subnet` package installed in Python 3.11 venv
-- **Central miner**: Can run on CPU, but executor setup timed out (network)
+- **Status**: ✅ Python packages installed in Python 3.11 venv
+- **Packages**: `compute-subnet`, `datura`, `miners` all installed
+- **Import test**: ✅ Passes
+- **Can start?** Yes, central miner runs on CPU
 - **Can earn?** ❌ No — needs Bittensor wallet + subnet 51 registration + GPU executor
 
 ### 6. targon (Confidential Compute)
@@ -71,16 +72,16 @@
 ## What Is Actually Running Right Now
 
 ```
-Process          PID      Status
+Process          Status
 -------------------------------------------
-k3s-server       31895    ✅ Running (475 MB RAM)
-salad-worker     40199    ⚠️ Stopped (97% CPU without backend)
-byteleap-worker  —        ❌ Not started (needs miner URL)
-nosana node      —        ❌ Not started (needs SOL)
-heurist miner    —        ❌ Not started (import error)
-akash provider   —        ❌ Not started (needs AKT wallet)
-lium miner     —        ❌ Not started (needs Bittensor wallet)
-targon miner     —        ❌ Not started (needs hotkey)
+k3s-server       ✅ Running (475 MB RAM)
+salad-worker     ⚠️ Not running (needs backend)
+byteleap-worker  ❌ Not running (needs miner URL)
+nosana node      ❌ Not running (needs SOL)
+heurist miner    ❌ Not running (needs wallet keys)
+akash provider   ❌ Not running (needs AKT wallet)
+lium miner       ❌ Not running (needs Bittensor wallet)
+targon miner     ❌ Not running (needs hotkey)
 ```
 
 ---
@@ -103,6 +104,48 @@ targon miner     —        ❌ Not started (needs hotkey)
 
 ---
 
+## Quick Start Commands (copy-paste ready)
+
+```bash
+# 1. ByteLeap Worker
+#    Replace your-miner-ip with a real ByteLeap Miner IP
+cd /home/user/CascadeProjects/qvac-chimera/upstream/byteleap-worker
+sed -i 's|your-miner-ip|192.168.1.100|' config/provider-consumer-config.yaml
+./byteleap-worker -config config/provider-consumer-config.yaml
+
+# 2. Salad Worker (local dev mode)
+cd /home/user/CascadeProjects/qvac-chimera/upstream/salad-job-queue-worker
+SALAD_LOCAL_MODE=true SALAD_LOCAL_TOKEN=dev-token ./salad-worker
+
+# 3. Heurist Miner (CPU mode)
+cd /home/user/CascadeProjects/qvac-chimera/upstream/heurist-miner-release
+source /home/user/.venvs/heurist-py311/bin/activate
+# Copy your wallet config into config.toml, then:
+python sd-miner.py --auto-confirm yes
+
+# 4. Nosana Node
+cd /home/user/CascadeProjects/qvac-chimera/upstream/nosana-cli
+node dist/src/index.js node start mainnet --provider docker
+# Wallet: ~/.nosana/nosana_key.json
+
+# 5. Akash Provider
+export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+provider-services run --from <key-name> --node $AKASH_NODE
+
+# 6. Lium Central Miner
+cd /home/user/CascadeProjects/qvac-chimera/upstream/lium-io
+source /home/user/.venvs/lium-py311/bin/activate
+python neurons/miner.py --netuid 51
+
+# 7. Targon CPU Provider
+cd /home/user/CascadeProjects/qvac-chimera/upstream/targon
+export TARGON_SKIP_HW_ATTESTATION=1
+export TARGON_SKIP_GPU_CHECK=1
+./tvm/install -node-type CPU
+```
+
+---
+
 ## Next Steps to Actually Earn
 
 1. **Add an NVIDIA GPU** (RTX 3060 12GB minimum recommended)
@@ -113,10 +156,9 @@ targon miner     —        ❌ Not started (needs hotkey)
    - Lium — fund Bittensor wallet and register on subnet 51
    - Targon — fund Targon wallet and run tvm/install with hotkey
    - ByteLeap — obtain Miner URL and enrollment token
-3. **Fix heurist dependencies** by using Python 3.11 venv with exact pinned versions.
-4. **Set up a real SaladCloud container host** (proprietary software) or connect the
+3. **Set up a real SaladCloud container host** (proprietary software) or connect the
    job-queue worker to a dev gRPC endpoint.
-5. **Run the unified startup script**: `bash /home/user/CascadeProjects/qvac-chimera/providers/start-all.sh`
+4. **Run the unified startup script**: `bash /home/user/CascadeProjects/qvac-chimera/providers/start-all.sh`
 
 ---
 
