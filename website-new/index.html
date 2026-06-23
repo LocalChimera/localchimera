@@ -664,16 +664,25 @@
         }
       }
 
-      const asset = pickAsset(data.assets || [], os);
-      if (asset && asset.browser_download_url && os !== 'ios') {
-        // Hidden iframe is more reliable than window.open for cross-origin file downloads on mobile
-        const iframe = document.createElement('iframe');
-        iframe.style.display = 'none';
-        iframe.src = asset.browser_download_url;
-        document.body.appendChild(iframe);
-        setTimeout(() => { try { iframe.remove(); } catch(e) {} }, 30000);
+      if (!data || !data.assets) {
+        window.open(fallback, '_blank');
+        reset();
+        return;
+      }
 
-        if (osLabel) osLabel.textContent = 'Downloading ' + (data ? data.tag_name : '') + '...';
+      const asset = pickAsset(data.assets, os);
+      if (asset && asset.browser_download_url) {
+        // Trigger download via hidden <a> tag — more reliable than iframe for cross-origin
+        const a = document.createElement('a');
+        a.style.display = 'none';
+        a.href = asset.browser_download_url;
+        a.target = '_blank';
+        a.rel = 'noopener';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+
+        if (osLabel) osLabel.textContent = 'Downloading ' + data.tag_name + '...';
         reset();
       } else {
         window.open(fallback, '_blank');
