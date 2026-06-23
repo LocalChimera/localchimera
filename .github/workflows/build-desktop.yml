@@ -231,11 +231,23 @@ jobs:
       - name: Build iOS app (device)
         run: |
           cd apps/mobile/ios/App
-          # Build for generic iOS device (not simulator) so archive path matches
-          xcodebuild -project App.xcodeproj -scheme App -sdk iphoneos -configuration Release build CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO ENABLE_BITCODE=NO
+          # Build for generic iOS device (not simulator) with explicit build dir
+          xcodebuild -project App.xcodeproj -target App -sdk iphoneos -configuration Release build CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO ENABLE_BITCODE=NO CONFIGURATION_BUILD_DIR=build/Release-iphoneos
       - name: Package iOS IPA
         run: |
           cd apps/mobile/ios/App
+          # Fallback: find .app if CONFIGURATION_BUILD_DIR didn't land where expected
+          if [ ! -d build/Release-iphoneos/App.app ]; then
+            echo "Searching for App.app..."
+            APP_PATH=$(find . -name "App.app" -type d | head -1)
+            if [ -z "$APP_PATH" ]; then
+              echo "ERROR: App.app not found"
+              find . -type d -name "*.app" || true
+              exit 1
+            fi
+            mkdir -p build/Release-iphoneos
+            cp -r "$APP_PATH" build/Release-iphoneos/
+          fi
           mkdir -p Payload
           cp -r build/Release-iphoneos/App.app Payload/
           du -sh Payload/App.app
@@ -293,7 +305,11 @@ jobs:
       - name: Install Expo deps
         run: |
           cd apps/mobile-expo
-          npm install
+          for i in 1 2 3; do
+            npm install && break
+            echo "npm install attempt $i failed, retrying in 15s..."
+            sleep 15
+          done
       - name: Expo prebuild (Android)
         run: |
           cd apps/mobile-expo
