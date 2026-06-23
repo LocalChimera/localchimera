@@ -110,6 +110,9 @@ export class TargonProvider {
       running: this.running,
       pid: this.process?.pid || null,
       configPath: this.configPath,
+      gpuMode: this.gpuMode,
+      nodeType: this.nodeType,
+      resources: this.gpuMode ? `CPU + ${this.nodeType}` : 'CPU only',
       recentLogs: this.logs.slice(-10)
     };
   }

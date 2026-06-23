@@ -8,3 +8,4 @@
 export { AkashProvider } from './AkashProvider.js';
 export { TargonProvider } from './TargonProvider.js';
 export { KeyringManager } from './KeyringManager.js';
+export { WalletSetup } from './WalletSetup.js';

@@ -12,6 +12,7 @@ import path from 'path';
 import { AkashProvider } from './miners/AkashProvider.js';
 import { TargonProvider } from './miners/TargonProvider.js';
 import { KeyringManager } from './miners/KeyringManager.js';
+import { WalletSetup } from './miners/WalletSetup.js';
 
 const logger = new Logger('ChimeraSDK');
 
@@ -97,6 +98,40 @@ export class ChimeraSDK {
 
   hasConsent() {
     return this.userConsent;
+  }
+
+  /**
+   * Onboard a new machine — recover wallets so it contributes resources
+   * and earnings flow to your address.
+   *
+   * Call this before init() on a brand-new machine.
+   * Returns instructions if credentials are missing.
+   */
+  async onboard() {
+    const result = await WalletSetup.onboardNewMachine();
+    const missing = [];
+
+    if (!result.akash.exists) {
+      missing.push({
+        network: 'akash',
+        instruction: 'Run: provider-services keys add mykey --recover (type your mnemonic interactively)'
+      });
+    }
+
+    if (!result.targon.exists) {
+      missing.push({
+        network: 'targon',
+        instruction: 'Use WalletSetup.recoverTargon(mnemonic) or targon-cli config to write ~/.config/.targon.json'
+      });
+    }
+
+    if (missing.length > 0) {
+      logger.warn(`[${this.appName}] New machine onboarding incomplete — ${missing.length} wallets missing`);
+      return { ready: false, missing, details: result };
+    }
+
+    logger.info(`[${this.appName}] New machine onboarded — all wallets present`);
+    return { ready: true, details: result };
   }
 
   /**
