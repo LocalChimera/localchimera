@@ -1,6 +1,6 @@
 #!/bin/bash
 # localchimera — Production Provider Startup Script
-# Starts all consumer-hardware-compatible provider nodes
+# CPU-only optimized launcher (GPU providers commented out)
 
 set -e
 LOGDIR="/home/user/CascadeProjects/qvac-chimera/providers/logs"
@@ -8,85 +8,59 @@ mkdir -p "$LOGDIR"
 
 echo "======================================"
 echo " localchimera Provider Launcher"
+echo " CPU-Only Mode"
 echo "======================================"
 
-# 1. ByteLeap Worker (soft provider mode)
-echo "[1/7] Starting ByteLeap Worker..."
-cd /home/user/CascadeProjects/qvac-chimera/upstream/byteleap-worker
-if [ -f ./byteleap-worker ]; then
-  nohup ./byteleap-worker -config config/provider-consumer-config.yaml \
-    > "$LOGDIR/byteleap.log" 2>&1 &
-  echo $! > "$LOGDIR/byteleap.pid"
-  echo "ByteLeap PID: $!"
+# --- 1. AKASH PROVIDER (BEST CPU EARNER) ---
+echo "[1/3] Akash Provider (RECOMMENDED CPU earner)..."
+if provider-services version >/dev/null 2>&1; then
+  echo "  provider-services installed: $(provider-services version)"
+  echo "  k3s status:"
+  sudo kubectl --kubeconfig /etc/rancher/k3s/k3s.yaml get nodes 2>/dev/null || echo "  kubectl failed"
+  echo ""
+  echo "  TO START: provider-services run --from <your-key> --node https://rpc.akashnet.net:443"
+  echo "  (needs AKT wallet + on-chain registration)"
 else
-  echo "ByteLeap binary not found. Run: cd upstream/byteleap-worker && CGO_ENABLED=0 go build -o byteleap-worker ./cmd/worker"
+  echo "  provider-services not found"
 fi
 
-# 2. Salad Job Queue Worker (local dev mode)
-echo "[2/7] Starting Salad Worker (local mode)..."
-cd /home/user/CascadeProjects/qvac-chimera/upstream/salad-job-queue-worker
-if [ -f ./salad-worker ]; then
-  SALAD_LOCAL_MODE=true SALAD_LOCAL_TOKEN=dev-token \
-    nohup ./salad-worker > "$LOGDIR/salad.log" 2>&1 &
-  echo $! > "$LOGDIR/salad.pid"
-  echo "Salad PID: $!"
+# --- 2. NOSANA CPU NODE ---
+echo ""
+echo "[2/3] Nosana Node (CPU mode, existing Solana wallet)..."
+cd /home/user/CascadeProjects/qvac-chimera/upstream/nosana-cli
+if [ -f dist/src/index.js ]; then
+  NODE_ADDR=$(node dist/src/index.js address 2>/dev/null | tail -1 || echo "unknown")
+  echo "  Wallet: $NODE_ADDR"
+  echo "  Config: ~/.nosana/nosana_key.json"
+  echo "  TO START: node dist/src/index.js node start mainnet --provider docker"
+  echo "  (needs SOL for gas + NOS for staking)"
 else
-  echo "Salad binary not found. Run: cd upstream/salad-job-queue-worker && go build -o salad-worker ./cmd/salad-http-job-queue-worker"
+  echo "  Nosana binary not built"
 fi
 
-# 3. Heurist Miner (CPU fallback)
-echo "[3/7] Starting Heurist Miner (CPU mode)..."
-cd /home/user/CascadeProjects/qvac-chimera/upstream/heurist-miner-release
-if [ -f sd-miner.py ]; then
-  source /home/user/.venvs/heurist-py311/bin/activate
-  # NOTE: This runs in CPU mode. For GPU mining, install CUDA and use default config.
-  nohup python sd-miner.py --config config.consumer.toml \
-    > "$LOGDIR/heurist.log" 2>&1 &
-  echo $! > "$LOGDIR/heurist.pid"
-  echo "Heurist PID: $!"
+# --- 3. TARGON CPU PROVIDER ---
+echo ""
+echo "[3/3] Targon CPU Provider (reduced rewards)..."
+cd /home/user/CascadeProjects/qvac-chimera/upstream/targon
+if [ -x tvm/install ]; then
+  echo "  tvm/install binary present"
+  echo "  TO START: TARGON_SKIP_HW_ATTESTATION=1 TARGON_SKIP_GPU_CHECK=1 ./tvm/install -node-type CPU"
+  echo "  (needs hotkey phrase + on-chain registration)"
 else
-  echo "Heurist miner not found."
+  echo "  tvm/install not found"
 fi
-
-# 4. Nosana CLI Node (CPU-only)
-echo "[4/7] Nosana Node (manual start required)..."
-echo "  Run: cd upstream/nosana-cli && node dist/src/index.js node start mainnet --provider docker"
-echo "  Wallet: ~/.nosana/nosana_key.json"
-echo "  Needs: SOL for gas, NOS for staking, NVIDIA GPU for GPU jobs"
-
-# 5. Akash Provider (via k3s)
-echo "[5/7] Akash Provider (manual start required)..."
-echo "  k3s is running. Run: provider-services run --from <key> --kubeconfig /etc/rancher/k3s/k3s.yaml"
-echo "  Needs: AKT wallet + on-chain provider registration"
-
-# 6. Lium Central Miner
-echo "[6/7] Lium Central Miner (manual start required)..."
-echo "  Run: source ~/.venvs/lium-py311/bin/activate && cd upstream/lium-io && python neurons/miner.py --netuid 51"
-echo "  Needs: Bittensor wallet + subnet 51 registration + GPU executor for earnings"
-
-# 7. Targon CPU Provider
-echo "[7/7] Targon CPU Provider (manual start required)..."
-echo "  Run: cd upstream/targon && ./tvm/install -node-type CPU"
-echo "  Needs: hotkey phrase, registration on Targon network"
 
 echo ""
 echo "======================================"
-echo " Background providers launched"
-echo " Logs: $LOGDIR"
+echo " Skipped (require GPU to earn):"
+echo "   - heurist-miner-release"
+echo "   - lium-io (executor needs GPU)"
+echo "   - byteleap-worker"
+echo "   - salad-job-queue-worker (not provider software)"
 echo "======================================"
 echo ""
-echo "BYTELEAP: pid $(cat $LOGDIR/byteleap.pid 2>/dev/null || echo 'not started')"
-echo "SALAD:    pid $(cat $LOGDIR/salad.pid 2>/dev/null || echo 'not started')"
-echo "HEURIST:  pid $(cat $LOGDIR/heurist.pid 2>/dev/null || echo 'not started')"
+echo "--- Next Steps ---"
+echo "1. Provide AKT wallet for Akash (best CPU earner)"
+echo "2. Fund Nosana wallet with SOL + NOS"
+echo "3. Provide Targon hotkey if you want reduced CPU rewards"
 echo ""
-echo "--- Credentials Required for Earnings ---"
-echo "NOSANA:   ~/.nosana/nosana_key.json needs SOL + NOS"
-echo "AKASH:    AKT wallet + provider deposit"
-echo "HEURIST:  Ethereum wallet on zkSync Sepolia"
-echo "LIUM:     Bittensor wallet + subnet 51 registration"
-echo "TARGON:   hotkey phrase for tvm/install"
-echo "BYTELEAP: real Miner URL + enrollment token"
-echo "SALAD:    gRPC job-queue backend or SaladCloud container host"
-echo ""
-echo "--- Hardware Upgrade for Earnings ---"
-echo "This machine has NO GPU. Add NVIDIA GPU (RTX 3060+) for real earnings."
