@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://localchimera.com/sitemap.xml
+Sitemap: https://new.localchimera.com/sitemap.xml
