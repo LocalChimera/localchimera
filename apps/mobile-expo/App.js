@@ -1,41 +1,56 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { StyleSheet, View, Text, ActivityIndicator } from 'react-native';
+import { StyleSheet, View, Text, ActivityIndicator, TouchableOpacity } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { Asset } from 'expo-asset';
 import { loadModel, completion, LLAMA_3_2_1B_INST_Q4_0 } from '@qvac/sdk';
 
 export default function App() {
-  const [modelStatus, setModelStatus] = useState('initializing');
+  const [modelStatus, setModelStatus] = useState('idle');
   const [frontendUri, setFrontendUri] = useState(null);
   const [modelId, setModelId] = useState(null);
+  const [modelError, setModelError] = useState(null);
   const webViewRef = useRef(null);
   const bridgeResolvers = useRef(new Map());
   const reqId = useRef(0);
 
+  // Load frontend immediately (never block UI on model)
   useEffect(() => {
-    async function init() {
+    async function initFrontend() {
       try {
-        // Load frontend assets
         const asset = await Asset.fromModule(require('./assets/frontend/index.html'));
         setFrontendUri(asset.localUri || asset.uri);
-
-        // Load on-device LLM via QVAC SDK
-        setModelStatus('downloading model...');
-        const mid = await loadModel({
-          modelSrc: LLAMA_3_2_1B_INST_Q4_0,
-          modelType: 'llm',
-          onProgress: (p) => {
-            setModelStatus(`downloading model: ${Math.round(p * 100)}%`);
-          },
-        });
-        setModelId(mid);
-        setModelStatus('ready');
       } catch (e) {
-        console.error('Init error:', e);
-        setModelStatus(`error: ${e.message}`);
+        console.error('Frontend load error:', e);
+        setFrontendUri('');
       }
     }
-    init();
+    initFrontend();
+  }, []);
+
+  // Load model separately so a crash here doesn't kill the whole app init
+  async function loadLLM() {
+    if (modelStatus === 'loading') return;
+    setModelStatus('loading');
+    setModelError(null);
+    try {
+      const mid = await loadModel({
+        modelSrc: LLAMA_3_2_1B_INST_Q4_0,
+        modelType: 'llm',
+        onProgress: (p) => {
+          setModelStatus(`loading model: ${Math.round(p * 100)}%`);
+        },
+      });
+      setModelId(mid);
+      setModelStatus('ready');
+    } catch (e) {
+      console.error('Model load error:', e);
+      setModelStatus('error');
+      setModelError(e.message || 'Failed to load model');
+    }
+  }
+
+  useEffect(() => {
+    loadLLM();
   }, []);
 
   async function handleAIWrite(body) {
@@ -161,11 +176,10 @@ export default function App() {
     );
   }
 
-  if (modelStatus !== 'ready') {
+  if (frontendUri === '') {
     return (
       <View style={styles.container}>
-        <ActivityIndicator size="large" color="#00e5ff" />
-        <Text style={styles.text}>{modelStatus}</Text>
+        <Text style={[styles.text, { color: '#ff6b6b' }]}>Failed to load frontend assets</Text>
       </View>
     );
   }
@@ -184,6 +198,24 @@ export default function App() {
         allowUniversalAccessFromFileURLs={true}
         originWhitelist={['*']}
       />
+      {/* Model status overlay */}
+      {modelStatus !== 'ready' && modelStatus !== 'idle' && (
+        <View style={styles.overlay}>
+          {modelStatus === 'error' ? (
+            <>
+              <Text style={styles.overlayText}>Model load failed: {modelError}</Text>
+              <TouchableOpacity onPress={loadLLM} style={styles.retryBtn}>
+                <Text style={styles.retryText}>Retry</Text>
+              </TouchableOpacity>
+            </>
+          ) : (
+            <>
+              <ActivityIndicator size="small" color="#00e5ff" />
+              <Text style={styles.overlayText}>{modelStatus}</Text>
+            </>
+          )}
+        </View>
+      )}
     </View>
   );
 }
@@ -203,5 +235,34 @@ const styles = StyleSheet.create({
     color: '#e8e2d8',
     marginTop: 16,
     fontSize: 14,
+  },
+  overlay: {
+    position: 'absolute',
+    bottom: 24,
+    left: 16,
+    right: 16,
+    backgroundColor: 'rgba(10,10,20,0.92)',
+    borderRadius: 12,
+    padding: 16,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(0,229,255,0.2)',
+  },
+  overlayText: {
+    color: '#e8e2d8',
+    fontSize: 13,
+    textAlign: 'center',
+  },
+  retryBtn: {
+    marginTop: 8,
+    backgroundColor: '#00e5ff',
+    paddingVertical: 6,
+    paddingHorizontal: 16,
+    borderRadius: 6,
+  },
+  retryText: {
+    color: '#0a0a14',
+    fontSize: 13,
+    fontWeight: '600',
   },
 });
