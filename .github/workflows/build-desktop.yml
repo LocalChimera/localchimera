@@ -228,28 +228,32 @@ jobs:
         run: |
           cd qvac/frontend
           npx cap sync ios
-      - name: Build iOS app
+      - name: Build iOS app (device)
         run: |
           cd apps/mobile/ios/App
-          xcodebuild -project App.xcodeproj -target App -destination 'platform=iOS Simulator,name=iPhone 15' -configuration Release build CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO
-      - name: Copy iOS app
+          # Build for generic iOS device (not simulator) so archive path matches
+          xcodebuild -project App.xcodeproj -scheme App -sdk iphoneos -configuration Release build CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO ENABLE_BITCODE=NO
+      - name: Package iOS IPA
         run: |
           cd apps/mobile/ios/App
-          ls -la build/Release-iphoneos/
-          mkdir -p ../../Chimera-iOS
-          cp -r build/Release-iphoneos/App.app ../../Chimera-iOS/App.app
-      - name: Compress iOS app
+          mkdir -p Payload
+          cp -r build/Release-iphoneos/App.app Payload/
+          du -sh Payload/App.app
+          zip -r Chimera-iOS.ipa Payload
+          rm -rf Payload
+      - name: Verify iOS artifact size
         run: |
-          cd apps/mobile/ios
-          tar -czf Chimera-iOS.tar.gz -C .. Chimera-iOS
-      - name: Verify iOS archive exists
-        run: |
-          ls -la apps/mobile/ios/Chimera-iOS.tar.gz
+          ls -lh apps/mobile/ios/App/Chimera-iOS.ipa
+          SIZE=$(stat -f%z apps/mobile/ios/App/Chimera-iOS.ipa 2>/dev/null || stat -c%s apps/mobile/ios/App/Chimera-iOS.ipa)
+          MB=$(awk "BEGIN {printf \"%.1f\", $SIZE/1024/1024}")
+          echo "IPA size: ${MB}MB"
+          if [ "$SIZE" -gt 4194304000 ]; then echo "ERROR: IPA exceeds 4GB hard limit"; exit 1; fi
+          if [ "$SIZE" -gt 209715200 ]; then echo "WARNING: IPA exceeds 200MB OTA threshold"; fi
       - name: Upload iOS artifact
         uses: actions/upload-artifact@v4
         with:
           name: chimera-ios
-          path: apps/mobile/ios/Chimera-iOS.tar.gz
+          path: apps/mobile/ios/App/Chimera-iOS.ipa
           if-no-files-found: error
 
   build-android:
@@ -309,68 +313,52 @@ jobs:
           APP_BUILD=apps/mobile-expo/android/app/build.gradle
           echo "=== Before patch ==="
           cat "$APP_BUILD"
-          echo "=== Inserting ABI splits + packaging options ==="
-          # Use Python for reliable multi-line insertion
-          python3 -c "
-import re
-with open('$APP_BUILD', 'r') as f:
-    content = f.read()
-
-# Add splits block after 'android {'
-if 'splits' not in content:
-    splits_block = '''    splits {
-        abi {
-            enable true
-            reset()
-            include \"arm64-v8a\", \"armeabi-v7a\"
-            universalApk false
-        }
-    }'''
-    content = content.replace('android {', 'android {\n' + splits_block, 1)
-
-# Add packagingOptions before buildTypes if not present
-if 'packagingOptions' not in content:
-    pkg = '''    packagingOptions {
-        jniLibs {
-            useLegacyPackaging true
-        }
-    }
-'''
-    content = content.replace('    buildTypes {', pkg + '    buildTypes {', 1)
-
-with open('$APP_BUILD', 'w') as f:
-    f.write(content)
-"
+          echo "=== Inserting ABI + density splits + packaging ==="
+          python3 apps/mobile-expo/scripts/patch-android-build.py "$APP_BUILD"
           echo "=== After patch ==="
           cat "$APP_BUILD"
+      - name: Patch AndroidManifest for extractNativeLibs
+        run: |
+          MANIFEST=apps/mobile-expo/android/app/src/main/AndroidManifest.xml
+          if [ -f "$MANIFEST" ] && ! grep -q 'extractNativeLibs' "$MANIFEST"; then
+            sed -i 's/<application/<application android:extractNativeLibs="true"/' "$MANIFEST"
+          fi
       - name: Build Expo AAB (Play Store) and APKs
         run: |
           cd apps/mobile-expo/android
           chmod +x ./gradlew
           ./gradlew --version
-          # Build AAB for Google Play (dynamic delivery, smallest download)
           ./gradlew bundleRelease -x mergeReleaseNativeDebugMetadata
-          # Build ABI-split APKs for direct distribution
           ./gradlew assembleRelease -x mergeReleaseNativeDebugMetadata
-      - name: Show build outputs and sizes
+      - name: Show build outputs and verify sizes
         run: |
           echo "=== AAB ==="
           ls -lh apps/mobile-expo/android/app/build/outputs/bundle/release/
           echo "=== APKs ==="
           ls -lh apps/mobile-expo/android/app/build/outputs/apk/release/
+          echo "=== Size checks ==="
+          AAB=apps/mobile-expo/android/app/build/outputs/bundle/release/app-release.aab
+          if [ -f "$AAB" ]; then
+            SIZE=$(stat -c%s "$AAB")
+            MB=$(awk "BEGIN {printf \"%.1f\", $SIZE/1024/1024}")
+            echo "AAB: ${MB}MB"
+            if [ "$SIZE" -gt 524288000 ]; then echo "ERROR: AAB >500MB (Google Play limit)"; exit 1; fi
+          fi
+          for apk in apps/mobile-expo/android/app/build/outputs/apk/release/*.apk; do
+            [ -f "$apk" ] || continue
+            SIZE=$(stat -c%s "$apk")
+            MB=$(awk "BEGIN {printf \"%.1f\", $SIZE/1024/1024}")
+            NAME=$(basename "$apk")
+            echo "APK $NAME: ${MB}MB"
+            if [ "$SIZE" -gt 209715200 ]; then echo "WARNING: APK >200MB"; fi
+          done
       - name: Rename and stage artifacts
         run: |
           mkdir -p mobile-build
-          # AAB for Play Store
           cp apps/mobile-expo/android/app/build/outputs/bundle/release/app-release.aab mobile-build/Chimera-Android.aab
-          # APKs per architecture
           for apk in apps/mobile-expo/android/app/build/outputs/apk/release/*; do
-            if [ -f "$apk" ]; then
-              echo "Found: $apk ($(du -h "$apk" | cut -f1))"
-              cp "$apk" mobile-build/
-            fi
+            [ -f "$apk" ] && cp "$apk" mobile-build/
           done
-          # If no split APKs were produced, fall back to universal
           if [ ! -f mobile-build/app-arm64-v8a-release.apk ] && [ -f apps/mobile-expo/android/app/build/outputs/apk/release/app-release.apk ]; then
             cp apps/mobile-expo/android/app/build/outputs/apk/release/app-release.apk mobile-build/Chimera-Android-universal.apk
           fi
