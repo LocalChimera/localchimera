@@ -520,12 +520,20 @@
         if (cached && cachedAt && (now - parseInt(cachedAt, 10)) < 300_000) {
           window._chimeraRelease = JSON.parse(cached);
         } else {
-          const res = await fetch('https://api.github.com/repos/LocalChimera/localchimera/releases/latest');
+          // Fetch all releases, filter out empty ones, pick newest with assets
+          const res = await fetch('https://api.github.com/repos/LocalChimera/localchimera/releases?per_page=20');
           if (res.ok) {
-            const data = await res.json();
-            window._chimeraRelease = data;
-            sessionStorage.setItem('chimeraRelease', JSON.stringify(data));
-            sessionStorage.setItem('chimeraReleaseAt', String(now));
+            const releases = await res.json();
+            // Sort by creation date descending, pick first with assets
+            const withAssets = releases
+              .filter(r => r.assets && r.assets.length > 0)
+              .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+            const data = withAssets[0] || null;
+            if (data) {
+              window._chimeraRelease = data;
+              sessionStorage.setItem('chimeraRelease', JSON.stringify(data));
+              sessionStorage.setItem('chimeraReleaseAt', String(now));
+            }
           }
         }
         // version info intentionally omitted from button label
@@ -636,13 +644,19 @@
       if (!data) {
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 10000);
-        const res = await fetch('https://api.github.com/repos/LocalChimera/localchimera/releases/latest', { signal: controller.signal });
+        const res = await fetch('https://api.github.com/repos/LocalChimera/localchimera/releases?per_page=20', { signal: controller.signal });
         clearTimeout(timeout);
         if (!res.ok) { window.open(fallback, '_blank'); reset(); return; }
-        data = await res.json();
-        window._chimeraRelease = data;
-        sessionStorage.setItem('chimeraRelease', JSON.stringify(data));
-        sessionStorage.setItem('chimeraReleaseAt', String(Date.now()));
+        const releases = await res.json();
+        const withAssets = releases
+          .filter(r => r.assets && r.assets.length > 0)
+          .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+        data = withAssets[0] || null;
+        if (data) {
+          window._chimeraRelease = data;
+          sessionStorage.setItem('chimeraRelease', JSON.stringify(data));
+          sessionStorage.setItem('chimeraReleaseAt', String(Date.now()));
+        }
       }
 
       const asset = pickAsset(data.assets || [], os);
