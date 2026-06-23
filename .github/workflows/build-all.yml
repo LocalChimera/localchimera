@@ -15,7 +15,7 @@ jobs:
       - name: Install qvac deps
         run: cd qvac && npm install
       - name: Run test suite
-        run: cd qvac && node --test test/router.test.js test/orchestrator.test.js test/payout.test.js test/payout-http.test.js test/solana.test.js
+        run: cd qvac && node --test tests/router.test.js tests/orchestrator.test.js tests/payout.test.js tests/payout-http.test.js tests/solana.test.js tests/auth.test.js
 
   build-linux:
     needs: test
