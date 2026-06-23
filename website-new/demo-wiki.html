@@ -1,0 +1,591 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Chimera</title>
+<link rel="icon" type="image/png" href="chimeralogo-header.png">
+<style>
+  *,*::before,*::after{box-sizing:border-box}
+  body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;background:#0e0d0b;color:#b0a898;line-height:1.6;overflow:hidden;height:100vh}
+  a{color:#00e5ff;text-decoration:none}
+  .demo-banner{position:fixed;top:0;left:0;right:0;z-index:200;background:linear-gradient(135deg,#00e5ff,#a855f7);color:#000;font-size:13px;font-weight:700;padding:6px 16px;text-align:center;display:flex;align-items:center;justify-content:center;gap:12px}
+  .demo-banner a{color:#000;text-decoration:underline;font-weight:800}
+  .layout{display:flex;height:100vh;padding-top:30px}
+
+  /* Sidebar */
+  .sidebar{width:240px;min-width:240px;background:#0b0a09;border-right:1px solid rgba(255,255,255,.06);display:flex;flex-direction:column;overflow:hidden;transition:transform .25s ease}
+  .sidebar-header{padding:14px 16px;border-bottom:1px solid rgba(255,255,255,.06);display:flex;align-items:center;gap:10px}
+  .logo-icon{width:28px;height:28px;border-radius:8px;background:linear-gradient(135deg,#00e5ff,#a855f7);color:#000;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:800}
+  .logo-text{font-size:16px;font-weight:700;color:#e8e2d8;letter-spacing:-.01em}
+  .search-box{padding:10px 12px}
+  .search-input{width:100%;background:#161410;border:1px solid rgba(255,255,255,.07);border-radius:6px;padding:7px 11px;color:#b0a898;font-size:13px;outline:none}
+  .nav-header{padding:8px 14px 4px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:#4a4540;font-family:ui-monospace,SFMono-Regular,monospace}
+  .nav{flex:1;overflow-y:auto;padding:0 8px 8px}
+  .nav-item{display:flex;align-items:center;gap:8px;padding:6px 9px;border-radius:5px;font-size:13px;color:#7a7468;transition:.15s}
+  .nav-item:hover{color:#c9a96e;background:#161410}
+  .nav-item.active{color:#c9a96e;background:#161410}
+  .nav-icon{font-size:12px;opacity:.6}
+  .nav-title{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .sidebar-footer{padding:10px 12px;border-top:1px solid rgba(255,255,255,.06)}
+  .new-page-btn{width:100%;padding:7px 0;background:#161410;color:#7a7468;border:1px solid rgba(255,255,255,.07);border-radius:5px;font-size:12px;cursor:pointer;transition:.15s}
+
+  /* Mobile hamburger */
+  .mobile-menu-btn{display:none;position:fixed;top:34px;left:8px;z-index:250;width:36px;height:36px;border-radius:8px;background:#161410;border:1px solid rgba(255,255,255,.1);color:#e8e2d8;font-size:18px;align-items:center;justify-content:center;cursor:pointer}
+  .mobile-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:90}
+  .ai-float-btn{display:flex;position:fixed;bottom:20px;right:20px;z-index:300;width:52px;height:52px;border-radius:50%;background:linear-gradient(135deg,#00e5ff,#a855f7);color:#000;font-size:24px;align-items:center;justify-content:center;cursor:pointer;box-shadow:0 4px 20px rgba(0,229,255,.3);border:none}
+
+  /* Main */
+  .main{flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0}
+  .toolbar{display:flex;align-items:center;gap:8px;padding:8px 14px;background:#0b0a09;border-bottom:1px solid rgba(255,255,255,.06);flex-shrink:0}
+  .toolbar-group{display:flex;align-items:center;gap:4px}
+  .toolbar-btn{padding:5px 11px;background:#161410;color:#7a7468;border:1px solid rgba(255,255,255,.07);border-radius:5px;font-size:11px;font-family:ui-monospace,SFMono-Regular,monospace;transition:.15s;cursor:default}
+  .mode-btn{padding:5px 12px;background:transparent;color:#4a4540;border:1px solid transparent;border-radius:5px;font-size:12px;font-family:ui-monospace,SFMono-Regular,monospace;cursor:default}
+  .mode-btn.active{background:#161410;color:#b0a898;border:1px solid rgba(255,255,255,.07)}
+
+  /* Editor pane */
+  .editor-pane{flex:1;display:flex;overflow:hidden;position:relative}
+  .pane-left{width:50%;overflow:auto;border-right:1px solid rgba(255,255,255,.06);padding:18px 22px;background:#161410;font-size:14px;line-height:1.7;font-family:ui-monospace,SFMono-Regular,monospace;color:#b0a898;white-space:pre-wrap}
+  .pane-right{flex:1;overflow:auto;display:flex;padding:0}
+  .preview{flex:1;padding:18px 26px;font-size:14px;line-height:1.7;overflow:auto;color:#b0a898}
+  .preview h1{font-size:26px;margin:18px 0 10px;color:#e8e2d8;font-weight:700;letter-spacing:-.02em}
+  .preview h2{font-size:18px;margin:16px 0 8px;color:#e8e2d8;font-weight:600;border-bottom:1px solid rgba(255,255,255,.06);padding-bottom:4px;letter-spacing:-.01em}
+  .preview h3{font-size:15px;margin:12px 0 6px;color:#c9a96e;font-weight:600}
+  .preview ul{padding-left:20px;margin:8px 0}
+  .preview li{margin:4px 0}
+  .preview code{background:rgba(255,255,255,.06);padding:2px 6px;border-radius:4px;font-size:13px;font-family:ui-monospace,monospace}
+  .preview pre{background:#161410;padding:12px;border-radius:6px;overflow:auto;font-size:13px;border:1px solid rgba(255,255,255,.06);margin:8px 0}
+  .preview pre code{background:transparent;padding:0}
+  .preview blockquote{border-left:3px solid #c9a96e;margin:8px 0;padding-left:12px;color:#7a7468;font-style:italic}
+  .preview a{color:#00e5ff}
+  .preview strong{color:#e8e2d8}
+  .toc{width:200px;min-width:200px;padding:16px 14px;border-left:1px solid rgba(255,255,255,.06);background:#0b0a09;font-size:12px}
+  .toc-title{font-weight:700;color:#7a7468;margin-bottom:8px;font-size:10px;text-transform:uppercase;letter-spacing:.06em;font-family:ui-monospace,monospace}
+  .toc-item{padding:3px 0;color:#7a7468}
+  .toc-item.sub{padding:3px 0 3px 12px;color:#4a4540}
+
+  /* AI panel */
+  .ai-panel{width:360px;min-width:360px;background:#0b0a09;border-left:1px solid rgba(255,255,255,.06);display:flex;flex-direction:column;overflow:hidden}
+  .ai-header{padding:12px 14px;border-bottom:1px solid rgba(255,255,255,.06);display:flex;align-items:center;justify-content:space-between;user-select:none;color:#b0a898;font-size:14px}
+  .ai-body{flex:1;overflow-y:auto;padding:12px 14px;display:flex;flex-direction:column;gap:12px}
+  .ai-field{display:flex;flex-direction:column;gap:5px}
+  .ai-label{font-size:10px;color:#4a4540;text-transform:uppercase;letter-spacing:.08em;font-weight:600;font-family:ui-monospace,monospace}
+  .ai-textarea{background:#161410;border:1px solid rgba(255,255,255,.07);border-radius:6px;padding:8px 10px;color:#b0a898;font-size:13px;resize:vertical;outline:none;font-family:ui-sans-serif,system-ui,sans-serif;min-height:60px}
+  .ai-input{background:#161410;border:1px solid rgba(255,255,255,.07);border-radius:6px;padding:7px 10px;color:#b0a898;font-size:13px;outline:none}
+  .ai-btn{background:#c9a96e;color:#0e0d0b;border:none;padding:8px 14px;border-radius:5px;font-size:12px;font-weight:600;font-family:ui-monospace,monospace;transition:.15s;cursor:default;opacity:.7}
+  .ai-hint{font-size:11px;color:#4a4540;line-height:1.5;margin-top:4px}
+  .ai-tabs{display:flex;gap:3;border-bottom:1px solid rgba(255,255,255,.06);padding-bottom:8px}
+  .ai-tab{padding:4px 8px;border-radius:4px;font-size:10px;white-space:nowrap;flex-shrink:0;font-family:ui-monospace,monospace;background:#161410;color:#7a7468;border:1px solid rgba(255,255,255,.07);cursor:pointer}
+  .ai-tab.active{background:#0e0d0b;color:#c9a96e;border:1px solid rgba(255,255,255,.1)}
+
+  .miner-panel{padding:10px 12px;border-top:1px solid rgba(255,255,255,.06);border-bottom:1px solid rgba(255,255,255,.06)}
+  .miner-title{font-size:10px;color:#4a4540;font-weight:600;text-transform:uppercase;letter-spacing:.06em;font-family:ui-monospace,monospace}
+  .miner-status{font-size:10px;color:#86efac;line-height:1.5}
+  .miner-input{width:100%;background:#161410;border:1px solid rgba(255,255,255,.07);border-radius:5px;padding:4px 8px;color:#b0a898;font-size:10px;outline:none;margin-top:6px;font-family:ui-monospace,monospace}
+  .miner-btns{display:flex;gap:4;margin-top:6px}
+  .miner-btn{flex:1;padding:5px 0;font-size:10px;border-radius:5px;border:none;cursor:default;background:#161410;color:#7a7468;border:1px solid rgba(255,255,255,.07)}
+
+  /* Memory Panel */
+  .memory-panel{margin-top:auto;padding:10px 14px;border-top:1px solid rgba(255,255,255,.06);background:#0b0a09;display:flex;flex-direction:column;gap:6px}
+  .memory-header{font-size:10px;color:#4a4540;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;font-family:ui-monospace,SFMono-Regular,monospace}
+  .memory-subtitle{font-size:10px;color:#86efac;line-height:1.5}
+  .memory-btns{display:flex;flex-direction:column;gap:3px}
+  .memory-endpoint-btn{padding:3px 6px;font-size:9px;border-radius:4px;border:1px solid rgba(255,255,255,.07);background:#161410;color:#7a7468;font-family:ui-monospace,SFMono-Regular,monospace;text-align:left;cursor:pointer;transition:.15s}
+  .memory-endpoint-btn:hover{background:#0e0d0b;color:#b0a898;border-color:rgba(255,255,255,.1)}
+  .memory-details{font-size:10px;color:#7a7468}
+  .memory-details summary{cursor:pointer;color:#4a4540;font-weight:600;font-size:10px}
+  .memory-details .memory-help{padding:6px 0;display:flex;flex-direction:column;gap:4px;line-height:1.5}
+  .memory-details .memory-help b{color:#b0a898}
+
+  /* Mobile responsiveness */
+  @media (max-width:768px){
+    body{overflow:auto;height:auto}
+    .layout{flex-direction:column;height:auto;padding-top:48px}
+    .mobile-menu-btn{display:flex}
+    .mobile-overlay{display:block;opacity:0;pointer-events:none;transition:opacity .2s}
+    .mobile-overlay.open{opacity:1;pointer-events:auto}
+    .sidebar{position:fixed;top:30px;left:0;bottom:0;z-index:100;width:260px;min-width:260px;transform:translateX(-100%);border-right:1px solid rgba(255,255,255,.1)}
+    .sidebar.open{transform:translateX(0)}
+    .main{min-height:100vh}
+    .toolbar{flex-wrap:wrap;gap:6px;padding:8px 10px}
+    .toolbar-group{flex-wrap:wrap}
+    .toolbar-btn{padding:4px 8px;font-size:10px}
+    .mode-btn{padding:4px 10px;font-size:11px}
+    .editor-pane{flex-direction:column}
+    .pane-left{width:100%;min-height:200px;border-right:none;border-bottom:1px solid rgba(255,255,255,.06);padding:12px 14px;font-size:13px}
+    .pane-right{flex-direction:column}
+    .preview{padding:14px 16px;font-size:13px}
+    .preview h1{font-size:22px}
+    .preview h2{font-size:16px}
+    .preview h3{font-size:14px}
+    .toc{width:100%;min-width:auto;border-left:none;border-top:1px solid rgba(255,255,255,.06);padding:12px 14px}
+    .ai-panel{position:fixed;top:30px;right:0;bottom:0;width:85%;max-width:360px;z-index:220;background:#0b0a09;border-left:1px solid rgba(255,255,255,.1);transform:translateX(100%);transition:transform .25s ease;display:flex;flex-direction:column}
+    .ai-panel.ai-open{transform:translateX(0)}
+    .ai-panel .ai-header{padding:12px 16px;border-bottom:1px solid rgba(255,255,255,.06);display:flex;align-items:center;justify-content:space-between;cursor:pointer;flex-shrink:0}
+    .ai-panel .ai-body{flex:1;overflow-y:auto;padding:12px 16px}
+    .ai-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:210}
+    .ai-overlay.open{display:block}
+    .ai-tabs{overflow-x:auto;gap:2px;padding-bottom:6px;flex-shrink:0}
+    .ai-tab{padding:4px 6px;font-size:9px}
+    .demo-banner{font-size:11px;padding:4px 10px;gap:6px}
+    .settings-btn{display:flex;position:fixed;bottom:84px;right:20px;z-index:300;width:44px;height:44px;border-radius:50%;background:#161410;border:1px solid rgba(255,255,255,.1);color:#b0a898;font-size:18px;align-items:center;justify-content:center;cursor:pointer}
+    .settings-panel{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:350;align-items:center;justify-content:center;padding:20px}
+    .settings-panel.open{display:flex}
+    .settings-card{background:#0b0a0b;border:1px solid rgba(255,255,255,.08);border-radius:12px;padding:20px;width:100%;max-width:340px;max-height:80vh;overflow-y:auto}
+    .settings-title{font-size:16px;font-weight:700;color:#e8e2d8;margin-bottom:16px}
+    .settings-row{display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid rgba(255,255,255,.05)}
+    .settings-label{font-size:13px;color:#b0a898}
+    .settings-desc{font-size:11px;color:#4a4540;margin-top:2px}
+    .settings-toggle{width:44px;height:24px;border-radius:12px;background:#161410;border:1px solid rgba(255,255,255,.1);position:relative;cursor:pointer;transition:.2s}
+    .settings-toggle.on{background:#00e5ff}
+    .settings-toggle::after{content:'';position:absolute;top:2px;left:2px;width:18px;height:18px;border-radius:50%;background:#fff;transition:.2s}
+    .settings-toggle.on::after{left:22px}
+    .settings-close{margin-top:16px;width:100%;padding:8px 0;background:#161410;color:#b0a898;border:1px solid rgba(255,255,255,.07);border-radius:6px;font-size:13px;cursor:pointer}
+  }
+</style>
+</head>
+<body>
+
+<div class="demo-banner">
+  <span>🔒 DEMO — Read only</span>
+  <span>·</span>
+  <a href="index.html">← Back to Chimera</a>
+  <span>·</span>
+  <a href="https://github.com/LocalChimera/localchimera">Download the app →</a>
+</div>
+
+<button class="mobile-menu-btn" onclick="toggleSidebar()" aria-label="Open menu">☰</button>
+<div class="mobile-overlay" id="mobileOverlay" onclick="toggleSidebar()"></div>
+
+<div class="layout">
+  <!-- Sidebar -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-header">
+      <div class="logo-icon" style="background:none;overflow:hidden"><img src="chimeralogo-header.png" alt="Chimera" style="width:40px;height:40px;border-radius:10px;object-fit:cover"></div>
+      <div class="logo-text" style="font-size:20px;font-weight:800">Chimera</div>
+    </div>
+    <div class="search-box">
+      <input class="search-input" placeholder="Search wiki..." readonly>
+    </div>
+    <div class="nav-header">OKF Bundle</div>
+    <div class="nav">
+      <div class="nav-item active"><span class="nav-icon">�</span><span class="nav-title">index.md</span></div>
+      <div class="nav-item"><span class="nav-icon">�</span><span class="nav-title">log.md</span></div>
+      <div class="nav-header">concepts/</div>
+      <div class="nav-item"><span class="nav-icon">�</span><span class="nav-title">index.md</span></div>
+      <div class="nav-item"><span class="nav-icon">📝</span><span class="nav-title">getting-started.md</span></div>
+      <div class="nav-item"><span class="nav-icon">📝</span><span class="nav-title">ai-writing-guide.md</span></div>
+      <div class="nav-item"><span class="nav-icon">📝</span><span class="nav-title">p2p-sync.md</span></div>
+      <div class="nav-item"><span class="nav-icon">📝</span><span class="nav-title">mining-setup.md</span></div>
+      <div class="nav-header">reference/</div>
+      <div class="nav-item"><span class="nav-icon">📑</span><span class="nav-title">index.md</span></div>
+      <div class="nav-item"><span class="nav-icon">📝</span><span class="nav-title">markdown-syntax.md</span></div>
+    </div>
+    <div class="miner-panel">
+      <div class="miner-title">Miner Node</div>
+      <div class="miner-status">🟢 Running — earning on inference tasks</div>
+      <input class="miner-input" placeholder="0x... EVM payout address" readonly>
+      <div class="miner-btns">
+        <div class="miner-btn">▶ Start</div>
+        <div class="miner-btn">⏹ Stop</div>
+      </div>
+    </div>
+    <div class="sidebar-footer">
+      <button class="new-page-btn">+ New Page</button>
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <main class="main">
+    <!-- Toolbar -->
+    <div class="toolbar">
+      <div class="toolbar-group">
+        <span class="toolbar-btn">H1</span>
+        <span class="toolbar-btn">H2</span>
+        <span class="toolbar-btn">H3</span>
+        <span class="toolbar-btn">Bold</span>
+        <span class="toolbar-btn">Italic</span>
+        <span class="toolbar-btn">Code</span>
+        <span class="toolbar-btn">Link</span>
+        <span class="toolbar-btn">List</span>
+        <span class="toolbar-btn">Quote</span>
+        <span class="toolbar-btn">Rule</span>
+      </div>
+      <div class="toolbar-group">
+        <span class="mode-btn">Edit</span>
+        <span class="mode-btn active">Split</span>
+        <span class="mode-btn">Preview</span>
+      </div>
+      <div class="toolbar-group" style="margin-left:auto">
+        <span class="toolbar-btn" style="background:#7f1d1d;color:#fca5a5;border-color:#7f1d1d">🗑 Delete</span>
+        <span style="font-size:12px;color:#94a3b8;min-width:140px;text-align:right">Last saved 2s ago</span>
+      </div>
+    </div>
+
+    <!-- Editor + Preview -->
+    <div class="editor-pane">
+      <div class="pane-left">---
+id: index
+title: Welcome to Chimera
+description: Root index for the Chimera knowledge bundle
+tags:
+  - wiki
+  - ai
+  - okf
+created: 2026-06-18
+modified: 2026-06-18
+---
+
+# Welcome to Chimera
+
+This is your personal wiki powered by local AI inference.
+
+## Getting Started
+
+- Use the **AI Writer** panel to generate content
+- Edit markdown directly in the editor
+- Preview renders your markdown in real-time
+
+## Example
+
+```javascript
+// Generated by AI
+console.log("Hello, wiki!");
+```
+
+> "Knowledge is power."
+
+## Related
+
+- [concepts/getting-started](concepts/getting-started.md)
+- [concepts/ai-writing-guide](concepts/ai-writing-guide.md)
+- [Google Cloud Knowledge Catalog](https://github.com/GoogleCloudPlatform/knowledge-catalog/)
+
+## Bundle Structure
+
+This wiki follows the [Open Knowledge Format](https://github.com/GoogleCloudPlatform/knowledge-catalog/tree/main/okf).
+
+```
+chimera-wiki/
+├── index.md                 # Root directory listing
+├── log.md                   # Update history
+├── concepts/
+│   ├── index.md             # Concepts directory listing
+│   ├── getting-started.md
+│   ├── ai-writing-guide.md
+│   ├── p2p-sync.md
+│   └── mining-setup.md
+└── reference/
+    ├── index.md             # Reference directory listing
+    └── markdown-syntax.md
+```
+
+#wiki #ai #okf</div>
+      <div class="pane-right">
+        <div class="preview">
+          <div style="padding:10px 12px;background:#0b0a09;border:1px solid rgba(255,255,255,.06);border-radius:6px;margin-bottom:14px;font-size:12px;font-family:ui-monospace,SFMono-Regular,monospace;color:#4a4540;line-height:1.6">
+            <div style="color:#7a7468;margin-bottom:4px;font-weight:600">Frontmatter (OKF)</div>
+            <div>id: <span style="color:#a855f7">index</span></div>
+            <div>title: <span style="color:#00e5ff">Welcome to Chimera</span></div>
+            <div>tags: <span style="color:#4ade80">wiki, ai, okf</span></div>
+          </div>
+          <h1>Welcome to Chimera</h1>
+          <p>This is your personal wiki powered by local AI inference.</p>
+          <h2>Getting Started</h2>
+          <ul>
+            <li>Use the <strong>AI Writer</strong> panel to generate content</li>
+            <li>Edit markdown directly in the editor</li>
+            <li>Preview renders your markdown in real-time</li>
+          </ul>
+          <h2>Example</h2>
+          <pre><code>// Generated by AI
+console.log("Hello, wiki!");</code></pre>
+          <blockquote>"Knowledge is power."</blockquote>
+          <h2>Related</h2>
+          <ul>
+            <li><a href="#">concepts/getting-started</a></li>
+            <li><a href="#">concepts/ai-writing-guide</a></li>
+            <li><a href="https://github.com/GoogleCloudPlatform/knowledge-catalog/" target="_blank" rel="noopener">Google Cloud Knowledge Catalog ↗</a></li>
+          </ul>
+          <h2>Bundle Structure</h2>
+          <pre style="font-size:12px"><code>chimera-wiki/
+├── index.md
+├── log.md
+├── concepts/
+│   ├── index.md
+│   ├── getting-started.md
+│   ├── ai-writing-guide.md
+│   ├── p2p-sync.md
+│   └── mining-setup.md
+└── reference/
+    ├── index.md
+    └── markdown-syntax.md</code></pre>
+        </div>
+        <div class="toc">
+          <div class="toc-title">Contents</div>
+          <div class="toc-item">Frontmatter</div>
+          <div class="toc-item">Welcome to Chimera</div>
+          <div class="toc-item">Getting Started</div>
+          <div class="toc-item sub">Example</div>
+          <div class="toc-item">Related</div>
+          <div class="toc-item sub">Bundle Structure</div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- AI overlay -->
+  <div class="ai-overlay" id="aiOverlay" onclick="closeAiSidebar()"></div>
+
+  <!-- AI Panel -->
+  <aside class="ai-panel" id="aiPanel">
+    <div class="ai-header" id="aiHeader">
+      <span>🤖 AI Writer</span>
+      <span id="aiChevron" style="font-size:16px;color:#4a4540">›</span>
+    </div>
+    <div class="ai-body" id="aiBody">
+      <div class="ai-tabs">
+        <span class="ai-tab active" onclick="switchTab(this,'gen')">Generate</span>
+        <span class="ai-tab" onclick="switchTab(this,'edit')">Edit</span>
+        <span class="ai-tab" onclick="switchTab(this,'draft')">Draft</span>
+        <span class="ai-tab" onclick="switchTab(this,'analyze')">Analyze</span>
+        <span class="ai-tab" onclick="switchTab(this,'ingest')">Ingest</span>
+        <span class="ai-tab" onclick="switchTab(this,'auto')">Auto</span>
+      </div>
+
+      <div id="tab-gen">
+        <div class="ai-field">
+          <div class="ai-label">Prompt</div>
+          <textarea class="ai-textarea" placeholder="What should I write about?" readonly></textarea>
+        </div>
+        <div class="ai-field">
+          <div class="ai-label">Title (optional)</div>
+          <input class="ai-input" placeholder="Page title" readonly>
+        </div>
+        <div class="ai-btn">Generate</div>
+      </div>
+
+      <div id="tab-edit" style="display:none">
+        <div class="ai-field">
+          <div class="ai-label">Selected text</div>
+          <textarea class="ai-textarea" placeholder="Highlight text in the editor to transform it..." readonly></textarea>
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px">
+          <span class="ai-btn" style="flex:1;min-width:80px;text-align:center">Shorten</span>
+          <span class="ai-btn" style="flex:1;min-width:80px;text-align:center">Expand</span>
+          <span class="ai-btn" style="flex:1;min-width:80px;text-align:center">Fix</span>
+          <span class="ai-btn" style="flex:1;min-width:80px;text-align:center">Formal</span>
+          <span class="ai-btn" style="flex:1;min-width:80px;text-align:center">Continue</span>
+          <span class="ai-btn" style="flex:1;min-width:80px;text-align:center">Critique</span>
+        </div>
+      </div>
+
+      <div id="tab-draft" style="display:none">
+        <div class="ai-field">
+          <div class="ai-label">Outline</div>
+          <textarea class="ai-textarea" placeholder="Paste an outline or bullet list..." readonly></textarea>
+        </div>
+        <div class="ai-field">
+          <div class="ai-label">Tone</div>
+          <select class="ai-input" disabled style="background:#161410;color:#7a7468"><option>Academic</option><option>Casual</option><option>Persuasive</option><option>Technical</option></select>
+        </div>
+        <div class="ai-btn">Draft from outline</div>
+      </div>
+
+      <div id="tab-analyze" style="display:none">
+        <div class="ai-field">
+          <div class="ai-label">Text to analyze</div>
+          <textarea class="ai-textarea" placeholder="Paste text to analyze structure, sentiment, and readability..." readonly></textarea>
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px">
+          <span class="ai-btn" style="flex:1;min-width:100px;text-align:center">Structure</span>
+          <span class="ai-btn" style="flex:1;min-width:100px;text-align:center">Sentiment</span>
+          <span class="ai-btn" style="flex:1;min-width:100px;text-align:center">Readability</span>
+        </div>
+      </div>
+
+      <div id="tab-ingest" style="display:none">
+        <div class="ai-field">
+          <div class="ai-label">Content to ingest</div>
+          <textarea class="ai-textarea" placeholder="Paste text, notes, or a document to add to Openviking memory..." readonly style="min-height:100px"></textarea>
+        </div>
+        <div class="ai-field">
+          <div class="ai-label">Source tag</div>
+          <input class="ai-input" placeholder="e.g. wiki, pdf, conversation" readonly>
+        </div>
+        <div style="display:flex;gap:6px">
+          <span class="ai-btn" style="flex:1;text-align:center">Ingest to Memory</span>
+          <span class="ai-btn" style="flex:1;text-align:center">Ingest File</span>
+        </div>
+        <div class="ai-hint" style="margin-top:8px">Content is chunked, embedded, and stored in local Hypercore. Queries retrieve from this memory.</div>
+      </div>
+
+      <div id="tab-auto" style="display:none">
+        <div class="ai-field">
+          <div class="ai-label">Auto mode</div>
+          <div style="padding:10px;background:#161410;border:1px solid rgba(255,255,255,.07);border-radius:6px;font-size:12px;color:#7a7468;line-height:1.5">
+            AI monitors your writing and suggests completions in real-time. Toggle to enable.
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;margin-top:8px">
+          <span style="font-size:13px;color:#b0a898">Auto-suggest</span>
+          <span style="margin-left:auto;padding:4px 12px;background:#7a7468;border-radius:10px;font-size:11px;color:#0e0d0b;font-weight:700">OFF</span>
+        </div>
+        <div style="margin-top:12px;padding:8px;background:#450a0a;border:1px solid #b91c1c;border-radius:6px;font-size:11px;color:#fca5a5">
+          ⚠️ Auto mode runs inference on every keystroke. Battery usage will increase.
+        </div>
+      </div>
+
+      <div class="ai-hint">AI runs locally on your device via QVAK. No data leaves your machine.</div>
+
+      <div class="memory-panel">
+        <div class="memory-header">Chimera Memory</div>
+        <div class="memory-subtitle">AI memory store via REST API</div>
+        <div class="memory-btns">
+          <button class="memory-endpoint-btn" onclick="navigator.clipboard.writeText(window.location.origin + '/api/llmwiki-docs')">📋 Copy docs endpoint</button>
+          <button class="memory-endpoint-btn" onclick="navigator.clipboard.writeText(window.location.origin + '/api/llmwiki-search?q=')">📋 Copy search endpoint</button>
+          <button class="memory-endpoint-btn" onclick="navigator.clipboard.writeText(window.location.origin + '/api/llmwiki-graph?id=')">📋 Copy graph endpoint</button>
+        </div>
+        <details class="memory-details">
+          <summary>How to connect an AI</summary>
+          <div class="memory-help">
+            <div><b>1. Search</b><br>GET /api/llmwiki-search?q={query}</div>
+            <div><b>2. Read</b><br>GET /api/llmwiki-docs</div>
+            <div><b>3. Graph</b><br>GET /api/llmwiki-graph?id={pageId}</div>
+          </div>
+        </details>
+      </div>
+    </div>
+  </aside>
+</div>
+
+<script>
+function switchTab(el, id) {
+  document.querySelectorAll('.ai-tab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  ['gen','edit','draft','analyze','ingest','auto'].forEach(k => {
+    document.getElementById('tab-'+k).style.display = k === id ? 'block' : 'none';
+  });
+}
+
+function toggleSidebar() {
+  const sb = document.getElementById('sidebar');
+  const ov = document.getElementById('mobileOverlay');
+  const isOpen = sb.classList.contains('open');
+  if (isOpen) {
+    sb.classList.remove('open');
+    ov.classList.remove('open');
+  } else {
+    sb.classList.add('open');
+    ov.classList.add('open');
+  }
+}
+
+// Mobile AI sidebar open/close
+function openAiSidebar() {
+  document.getElementById('aiPanel').classList.add('ai-open');
+  document.getElementById('aiOverlay').classList.add('open');
+}
+function closeAiSidebar() {
+  document.getElementById('aiPanel').classList.remove('ai-open');
+  document.getElementById('aiOverlay').classList.remove('open');
+}
+
+// Desktop: keep panel visible; mobile: start closed
+(function() {
+  const panel = document.getElementById('aiPanel');
+  if (window.innerWidth <= 768) {
+    panel.classList.remove('ai-open');
+  }
+})();
+</script>
+
+<!-- AI float button — toggle right sidebar -->
+<button class="ai-float-btn" id="aiFloatBtn" onclick="var p=document.getElementById('aiPanel'); if(p.classList.contains('ai-open')){ closeAiSidebar(); }else{ openAiSidebar(); }">🤖</button>
+
+<!-- Mobile settings button -->
+<button class="settings-btn" id="settingsBtn" onclick="toggleSettings()" aria-label="Settings">⚙️</button>
+
+<!-- Mobile settings panel -->
+<div class="settings-panel" id="settingsPanel" onclick="if(event.target===this)toggleSettings()">
+  <div class="settings-card" onclick="event.stopPropagation()">
+    <div class="settings-title">Settings</div>
+
+    <div class="settings-row">
+      <div>
+        <div class="settings-label">Start on device boot</div>
+        <div class="settings-desc">Auto-launch Chimera when your device turns on</div>
+      </div>
+      <div class="settings-toggle" id="toggleBoot" onclick="togglePref('boot')"></div>
+    </div>
+
+    <div class="settings-row">
+      <div>
+        <div class="settings-label">Add to home screen</div>
+        <div class="settings-desc">Install as an app icon on your home screen</div>
+      </div>
+      <div class="settings-toggle" id="toggleHome" onclick="togglePref('home')"></div>
+    </div>
+
+    <div class="settings-row">
+      <div>
+        <div class="settings-label">Keep AI panel open</div>
+        <div class="settings-desc">Always show AI Writer and Memory on load</div>
+      </div>
+      <div class="settings-toggle" id="toggleAi" onclick="togglePref('ai')"></div>
+    </div>
+
+    <button class="settings-close" onclick="toggleSettings()">Close</button>
+  </div>
+</div>
+
+<script>
+// Settings persistence
+function getPref(key){ try{return localStorage.getItem('chimera_'+key)==='1'}catch(e){return false} }
+function setPref(key,val){ try{localStorage.setItem('chimera_'+key,val?'1':'0')}catch(e){} }
+
+function toggleSettings(){
+  document.getElementById('settingsPanel').classList.toggle('open');
+}
+
+function togglePref(key){
+  const el = document.getElementById(key==='boot'?'toggleBoot':key==='home'?'toggleHome':'toggleAi');
+  const now = !el.classList.contains('on');
+  el.classList.toggle('on', now);
+  setPref(key, now);
+
+  if(key==='home' && now){
+    // Prompt PWA install if available
+    if(window.deferredPrompt){
+      window.deferredPrompt.prompt();
+    } else {
+      alert('Tap your browser menu and choose "Add to Home Screen"');
+    }
+  }
+  if(key==='ai' && now){
+    document.getElementById('aiPanel').classList.remove('mobile-collapsed');
+    document.getElementById('aiChevron').textContent = '›';
+  }
+}
+
+// Initialize toggles from storage
+(function(){
+  if(getPref('boot')) document.getElementById('toggleBoot').classList.add('on');
+  if(getPref('home')) document.getElementById('toggleHome').classList.add('on');
+  if(getPref('ai')){ document.getElementById('toggleAi').classList.add('on'); }
+  else if(window.innerWidth<=768){
+    // Default: keep AI open unless user explicitly turned it off
+    var aiEl = document.getElementById('toggleAi');
+    if(!aiEl.classList.contains('on')){ aiEl.classList.add('on'); setPref('ai',true); }
+  }
+})();
+
+// Capture PWA install prompt
+window.addEventListener('beforeinstallprompt', function(e){
+  e.preventDefault();
+  window.deferredPrompt = e;
+});
+</script>
+
+</body>
+</html>

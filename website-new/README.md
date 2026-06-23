@@ -1,25 +1,19 @@
-# new.localchimera.com
+# website/
 
-Modern React-based marketing site for Chimera. Built with Vite, React, Tailwind CSS, and Framer Motion.
+Static marketing site for Chimera. Deployed to Cloudflare Pages at https://localchimera.com
 
-## Development
+## Files
+
+- **index.html** — Landing page with features, download links, and navigation
+- **demo-wiki.html** — Read-only interactive demo of the LLM Wiki layout. Shows the full app UI (sidebar, editor, preview, AI Writer panel) without editing capability
+- **earnings.html** — Earnings dashboard where developers and miners enter their EVM address to view payout history
+- **chimeralogo.png** — Logo with background (for favicon)
+- **chimeralogo-header.png** — Logo without background (for header)
+- **banner2.png** — Hero banner image
+
+## Local development
 
 ```bash
-cd website-new
-npm install
-npm run dev
+python3 -m http.server 8080
+# Open http://localhost:8080
 ```
-
-## Build
-
-```bash
-npm run build
-```
-
-Output goes to `dist/` — deploy this folder to any static host (Cloudflare Pages, Vercel, Netlify, etc).
-
-## Structure
-
-- `src/components/` — Page sections (Hero, Features, Miners, etc.)
-- `src/App.jsx` — Main page composition
-- `public/` — Static assets (logos, banner)

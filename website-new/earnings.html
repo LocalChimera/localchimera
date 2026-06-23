@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Chimera</title>
+<link rel="icon" type="image/png" href="chimeralogo-header.png">
+<style>
+  *,*::before,*::after{box-sizing:border-box}
+  body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;background:#030308;color:#e8e2d8;line-height:1.6}
+  a{color:#00e5ff;text-decoration:none}
+  a:hover{color:#a855f7}
+  .container{max-width:720px;margin:0 auto;padding:0 24px}
+  header{padding:20px 0;border-bottom:1px solid rgba(255,255,255,.06)}
+  .logo{display:flex;align-items:center;gap:12px;font-size:20px;font-weight:800;color:#e8e2d8}
+  .logo-icon{width:40px;height:40px;border-radius:10px;display:flex;align-items:center;justify-content:center;overflow:hidden}
+  .logo-icon img{width:100%;height:100%;object-fit:cover;border-radius:10px}
+  .page{padding:48px 24px}
+  h1{font-size:28px;font-weight:700;margin-bottom:8px}
+  .subtitle{font-size:15px;color:#7a7468;margin-bottom:32px}
+  .card{border:1px solid rgba(255,255,255,.08);border-radius:16px;padding:28px;background:rgba(255,255,255,.015);margin-bottom:20px}
+  .input{width:100%;padding:10px 14px;border-radius:8px;border:1px solid rgba(255,255,255,.1);background:#0a0a12;color:#e8e2d8;font-size:13px;font-family:ui-monospace,SFMono-Regular,monospace;outline:none;transition:.2s}
+  .input:focus{border-color:rgba(0,229,255,.3)}
+  .input::placeholder{color:#4a4540}
+  .btn{display:inline-block;padding:10px 24px;border-radius:10px;border:none;background:linear-gradient(135deg,#00e5ff,#a855f7);color:#000;font-size:14px;font-weight:600;cursor:pointer;transition:.2s}
+  .btn:hover{transform:translateY(-2px);box-shadow:0 8px 24px rgba(0,229,255,.2)}
+  .row{display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid rgba(255,255,255,.04);font-size:14px}
+  .row:last-child{border-bottom:none}
+  .label{color:#7a7468}
+  .value{color:#e8e2d8;font-weight:600;font-family:ui-monospace,monospace}
+  .value.green{color:#4ade80}
+  .value.red{color:#fca5a5}
+  .empty{color:#4a4540;font-size:13px;text-align:center;padding:24px 0}
+  .month-header{font-size:14px;font-weight:600;color:#e8e2d8;margin:20px 0 12px;padding-bottom:8px;border-bottom:1px solid rgba(255,255,255,.06)}
+  .back{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:#7a7468;margin-bottom:24px}
+  .back:hover{color:#e8e2d8}
+  .error{color:#fca5a5;font-size:13px;margin-top:8px;min-height:18px}
+  .hint{color:#4a4540;font-size:12px;margin-top:4px}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="container" style="display:flex;align-items:center;justify-content:space-between">
+    <a href="index.html" class="logo">
+      <div class="logo-icon"><img src="chimeralogo-header.png" alt="Chimera" style="width:100%;height:100%;object-fit:cover;border-radius:8px"></div>
+      Chimera
+    </a>
+    <a href="index.html" style="font-size:13px;color:#7a7468">← Back</a>
+  </div>
+</header>
+
+<div class="page">
+  <div class="container">
+    <h1>Earnings Dashboard</h1>
+    <p class="subtitle">Enter your EVM address to view your mining earnings and payout history.</p>
+
+    <div class="card">
+      <div style="font-size:14px;font-weight:600;margin-bottom:12px">Your EVM address</div>
+      <input type="text" id="evmInput" class="input" placeholder="0x..." maxlength="42" oninput="clearError()">
+      <div class="hint">Works for both machine owners and app developers</div>
+      <div class="error" id="lookupError"></div>
+      <button class="btn" style="margin-top:16px" onclick="lookupEarnings()">Look up</button>
+    </div>
+
+    <div id="results"></div>
+  </div>
+</div>
+
+<script>
+  const API = (window.location.protocol === 'file:' || window.location.hostname === 'new.localchimera.com')
+    ? 'http://localhost:3002/api'
+    : `${window.location.origin}/api`;
+
+  function clearError() { document.getElementById('lookupError').textContent = ''; }
+
+  async function lookupEarnings() {
+    const addr = document.getElementById('evmInput').value.trim().toLowerCase();
+    const err = document.getElementById('lookupError');
+    const results = document.getElementById('results');
+    results.innerHTML = '';
+
+    if (!addr) { err.textContent = 'Enter an EVM address'; return; }
+    if (!/^0x[a-fA-F0-9]{40}$/.test(addr)) { err.textContent = 'Invalid EVM address'; return; }
+    err.textContent = '';
+
+    try {
+      // 1. Check if this is a registered user (machine owner)
+      const usersRes = await fetch(`${API}/payout/users`);
+      const usersJson = await usersRes.json();
+      const myUsers = (usersJson.users || []).filter(u => u.machineOwnerEVM === addr);
+
+      // 2. Check if this is a registered app developer
+      const appsRes = await fetch(`${API}/payout/apps`);
+      const appsJson = await appsRes.json();
+      const myApps = (appsJson.apps || []).filter(a => a.developerEVM === addr);
+
+      if (myUsers.length === 0 && myApps.length === 0) {
+        results.innerHTML = '<div class="card empty">No earnings found for this address.<br>Make sure your app is registered or your user is linked to an app.</div>';
+        return;
+      }
+
+      // 3. Fetch orders for all matching users
+      const ordersRes = await fetch(`${API}/payout/orders`);
+      const ordersJson = await ordersRes.json();
+      const allOrders = ordersJson.orders || [];
+
+      // Machine owner earnings
+      if (myUsers.length > 0) {
+        const userIds = myUsers.map(u => u.userId);
+        const myOrders = allOrders.filter(o => userIds.includes(o.userId));
+        const total = myOrders.reduce((s, o) => s + o.amount, 0);
+
+        const months = {};
+        for (const o of myOrders) {
+          const key = `${o.year}-${String(o.month).padStart(2, '0')}`;
+          months[key] = (months[key] || 0) + o.amount;
+        }
+
+        let html = '<div class="card">';
+        html += '<div style="font-size:14px;font-weight:600;margin-bottom:16px">Machine owner earnings</div>';
+        html += `<div class="row"><span class="label">Total earned</span><span class="value green">${total.toFixed(6)}</span></div>`;
+        html += `<div class="row"><span class="label">Orders completed</span><span class="value">${myOrders.length}</span></div>`;
+        html += '<div class="month-header">Monthly breakdown</div>';
+        const sortedKeys = Object.keys(months).sort().reverse();
+        if (sortedKeys.length === 0) {
+          html += '<div class="empty">No monthly data yet</div>';
+        } else {
+          for (const k of sortedKeys) {
+            html += `<div class="row"><span class="label">${k}</span><span class="value">${months[k].toFixed(6)}</span></div>`;
+          }
+        }
+        html += '</div>';
+        results.innerHTML += html;
+      }
+
+      // App developer earnings
+      if (myApps.length > 0) {
+        const appIds = myApps.map(a => a.appId);
+        const myAppOrders = allOrders.filter(o => appIds.includes(o.appId));
+        const totalRevenue = myAppOrders.reduce((s, o) => s + o.amount, 0);
+
+        for (const app of myApps) {
+          const appOrders = myAppOrders.filter(o => o.appId === app.appId);
+          const appTotal = appOrders.reduce((s, o) => s + o.amount, 0);
+          const devShare = appTotal * (app.feePercent || 0.30);
+
+          const months = {};
+          for (const o of appOrders) {
+            const key = `${o.year}-${String(o.month).padStart(2, '0')}`;
+            months[key] = (months[key] || 0) + o.amount;
+          }
+
+          let html = '<div class="card">';
+          html += `<div style="font-size:14px;font-weight:600;margin-bottom:16px">App developer — ${app.name || app.appId}</div>`;
+          html += `<div class="row"><span class="label">App revenue</span><span class="value">${appTotal.toFixed(6)}</span></div>`;
+          html += `<div class="row"><span class="label">Your fee (${((app.feePercent || 0.30) * 100).toFixed(0)}%)</span><span class="value green">${devShare.toFixed(6)}</span></div>`;
+          html += `<div class="row"><span class="label">Orders</span><span class="value">${appOrders.length}</span></div>`;
+          html += '<div class="month-header">Monthly breakdown</div>';
+          const sortedKeys = Object.keys(months).sort().reverse();
+          if (sortedKeys.length === 0) {
+            html += '<div class="empty">No monthly data yet</div>';
+          } else {
+            for (const k of sortedKeys) {
+              html += `<div class="row"><span class="label">${k}</span><span class="value">${months[k].toFixed(6)}</span></div>`;
+            }
+          }
+          html += '</div>';
+          results.innerHTML += html;
+        }
+      }
+
+    } catch (e) {
+      results.innerHTML = '<div class="card empty">Backend not reachable. Make sure the Chimera node is running on localhost:3002.</div>';
+    }
+  }
+</script>
+
+</body>
+</html>

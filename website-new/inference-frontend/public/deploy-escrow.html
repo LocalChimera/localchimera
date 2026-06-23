@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Chimera</title>
+  <link rel="icon" type="image/png" href="chimeralogo-header.png">
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 800px; margin: 40px auto; padding: 0 20px; }
+    button { padding: 10px 20px; font-size: 16px; cursor: pointer; }
+    pre { background: #f5f5f5; padding: 15px; border-radius: 6px; overflow-x: auto; }
+    .status { margin: 10px 0; padding: 10px; border-radius: 4px; }
+    .ok { background: #e8f5e9; }
+    .err { background: #ffebee; }
+  </style>
+</head>
+<body>
+  <h1>Deploy Updated Escrow Vault Contract</h1>
+  <p>This deploys the fixed escrow vault contract that accepts <code>caller_purse</code> for fund transfers.</p>
+
+  <button id="connectBtn">1. Connect Casper Wallet</button>
+  <div id="walletStatus"></div>
+
+  <br><br>
+  <button id="deployBtn" disabled>2. Deploy Contract</button>
+  <div id="deployStatus"></div>
+
+  <h3>Contract Args</h3>
+  <pre id="argsPreview"></pre>
+
+  <script type="module">
+    const RPC_URL = 'http://localhost:7778/rpc';
+    const CHAIN_NAME = 'casper-test';
+
+    const CONTRACTS = {
+      computeRegistry: 'f8c969bfa7553a23deab0f77fb43210d4810156a977e0cc2695b23182e5b41d0',
+      reputation: 'fd0bf02161433c13c3070b7d0ea383c976bcbc799413638b4fedc703d4efa1db',
+    };
+
+    let provider = null;
+    let publicKeyHex = '';
+    let accountHash = '';
+
+    document.getElementById('connectBtn').onclick = async () => {
+      provider = window.CasperWalletProvider;
+      if (!provider) {
+        document.getElementById('walletStatus').innerHTML = '<div class="status err">Casper Wallet extension not found. Please install it.</div>';
+        return;
+      }
+      const connected = await provider.requestConnection();
+      if (!connected) {
+        document.getElementById('walletStatus').innerHTML = '<div class="status err">Connection rejected.</div>';
+        return;
+      }
+      publicKeyHex = await provider.getActivePublicKey();
+      accountHash = await provider.getActivePublicKey(); // We'll derive it
+      document.getElementById('walletStatus').innerHTML = `<div class="status ok">Connected: ${publicKeyHex.slice(0,20)}...</div>`;
+      document.getElementById('deployBtn').disabled = false;
+    };
+
+    document.getElementById('deployBtn').onclick = async () => {
+      try {
+        document.getElementById('deployStatus').innerHTML = '<div class="status">Building deploy...</div>';
+
+        // Fetch WASM as base64 first
+        const wasmRes = await fetch('/escrow_vault.wasm');
+        const wasmBlob = await wasmRes.blob();
+        const wasmBytes = new Uint8Array(await wasmBlob.arrayBuffer());
+
+        // We need the SDK. Since this is a simple page, we'll build the deploy manually using the RPC
+        // Actually, let's use the SDK if available, otherwise do raw RPC
+        const sdk = window.casperJsSdk;
+        if (!sdk) {
+          document.getElementById('deployStatus').innerHTML = '<div class="status err">casper-js-sdk not loaded. Please open this page from the main app.</div>';
+          return;
+        }
+
+        const args = {
+          compute_registry: sdk.CLValue.newCLByteArray(hexToBytes(CONTRACTS.computeRegistry)),
+          reputation: sdk.CLValue.newCLByteArray(hexToBytes(CONTRACTS.reputation)),
+          owner: sdk.CLValue.newCLByteArray(hexToBytes(accountHash.replace('account-hash-', ''))),
+          protocol_fee_recipient: sdk.CLValue.newCLByteArray(hexToBytes(accountHash.replace('account-hash-', ''))),
+        };
+
+        const deploy = sdk.Deploy.makeDeploy(
+          new sdk.DeployHeader(publicKeyHex, CHAIN_NAME, Date.now(), '30m', 1, null),
+          sdk.ExecutableDeployItem.newModuleBytes(wasmBytes, sdk.Args.fromMap(args)),
+          sdk.ExecutableDeployItem.standardPayment('50000000000')
+        );
+
+        const deployJSON = sdk.Deploy.toJSON(deploy);
+        document.getElementById('argsPreview').textContent = JSON.stringify(deployJSON, null, 2);
+
+        // Sign with wallet
+        const signed = await provider.sign(JSON.stringify(deployJSON), publicKeyHex);
+        if (!signed || signed.cancelled) {
+          document.getElementById('deployStatus').innerHTML = '<div class="status err">Signing cancelled.</div>';
+          return;
+        }
+
+        // Reconstruct signed deploy
+        deploy.approvals = [{ signer: publicKeyHex, signature: signed.signatureHex }];
+        const finalDeploy = sdk.Deploy.fromJSON(sdk.Deploy.toJSON(deploy));
+
+        // Submit
+        const res = await fetch(RPC_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'account_put_deploy', params: { deploy: sdk.Deploy.toJSON(finalDeploy) } })
+        }).then(r => r.json());
+
+        if (res.error) {
+          document.getElementById('deployStatus').innerHTML = `<div class="status err">Deploy error: ${res.error.message}</div>`;
+        } else {
+          document.getElementById('deployStatus').innerHTML = `<div class="status ok">Deploy submitted! Hash: ${res.result.deploy_hash}</div>`;
+        }
+      } catch (e) {
+        document.getElementById('deployStatus').innerHTML = `<div class="status err">Error: ${e.message}</div>`;
+      }
+    };
+
+    function hexToBytes(hex) {
+      const bytes = new Uint8Array(32);
+      for (let i = 0; i < 32; i++) bytes[i] = parseInt(hex.substr(i * 2, 2), 16);
+      return bytes;
+    }
+  </script>
+  <script src="https://unpkg.com/casper-js-sdk@5.0.12/dist/bundle.umd.js"></script>
+</body>
+</html>

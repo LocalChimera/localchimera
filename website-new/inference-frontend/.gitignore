@@ -1,0 +1,9 @@
+node_modules
+dist
+.env
+.vite
+*.local
+test-*.mjs
+*.log
+nohup.out
+*.bak
