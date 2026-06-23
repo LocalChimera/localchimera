@@ -533,10 +533,15 @@
               window._chimeraRelease = data;
               sessionStorage.setItem('chimeraRelease', JSON.stringify(data));
               sessionStorage.setItem('chimeraReleaseAt', String(now));
+              // Show version in the note if OS was detected
+              const os = window._chimeraOS;
+              if (os && os !== 'unknown') {
+                const note = document.getElementById('osNote');
+                if (note) note.textContent = 'Detected ' + os + ' — v' + data.tag_name + '. Click to download.';
+              }
             }
           }
         }
-        // version info intentionally omitted from button label
       } catch (_) {}
     })();
   })();
@@ -668,7 +673,7 @@
         document.body.appendChild(iframe);
         setTimeout(() => { try { iframe.remove(); } catch(e) {} }, 30000);
 
-        if (osLabel) osLabel.textContent = 'Downloading...';
+        if (osLabel) osLabel.textContent = 'Downloading ' + (data ? data.tag_name : '') + '...';
         reset();
       } else {
         window.open(fallback, '_blank');
