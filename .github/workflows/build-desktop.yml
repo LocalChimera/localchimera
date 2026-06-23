@@ -373,7 +373,13 @@ jobs:
           mkdir -p mobile-build
           cp apps/mobile-expo/android/app/build/outputs/bundle/release/app-release.aab mobile-build/Chimera-Android.aab
           for apk in apps/mobile-expo/android/app/build/outputs/apk/release/*; do
-            [ -f "$apk" ] && cp "$apk" mobile-build/
+            [ -f "$apk" ] || continue
+            # Skip debug APKs — they are not release artifacts
+            if [[ "$(basename "$apk")" == *debug* ]]; then
+              echo "Skipping debug APK: $apk"
+              continue
+            fi
+            cp "$apk" mobile-build/
           done
           if [ ! -f mobile-build/app-arm64-v8a-release.apk ] && [ -f apps/mobile-expo/android/app/build/outputs/apk/release/app-release.apk ]; then
             cp apps/mobile-expo/android/app/build/outputs/apk/release/app-release.apk mobile-build/Chimera-Android-universal.apk

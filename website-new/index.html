@@ -546,15 +546,24 @@
     })();
   })();
 
+  function isDebugApk(name) { return name.toLowerCase().includes('debug'); }
+
+  function directDownloadUrl(os) {
+    const base = 'https://github.com/LocalChimera/localchimera/releases/latest/download/';
+    if (os === 'android') return base + 'app-arm64-v8a-release.apk';
+    if (os === 'ios')     return base + 'Chimera-iOS.ipa';
+    return null;
+  }
+
   function pickAsset(assets, os) {
     if (!assets || !assets.length) return null;
     const names = assets.map(a => a.name);
     if (os === 'android') {
-      // Prefer per-arch split APKs (arm64-v8a), then other APKs, then AAB
-      return assets.find(a => /arm64.*\.apk$/i.test(a.name))
-        || assets.find(a => /chimera.*android.*\.apk$/i.test(a.name))
-        || assets.find(a => /android.*\.apk$/i.test(a.name))
-        || assets.find(a => a.name.toLowerCase().endsWith('.apk'))
+      // Exclude debug APKs; prefer arm64 split APKs, then other APKs, then AAB
+      return assets.find(a => /arm64.*\.apk$/i.test(a.name) && !isDebugApk(a.name))
+        || assets.find(a => /chimera.*android.*\.apk$/i.test(a.name) && !isDebugApk(a.name))
+        || assets.find(a => /android.*\.apk$/i.test(a.name) && !isDebugApk(a.name))
+        || assets.find(a => a.name.toLowerCase().endsWith('.apk') && !isDebugApk(a.name))
         || assets.find(a => a.name.toLowerCase().endsWith('.aab'));
     }
     if (os === 'ios') {
@@ -671,16 +680,17 @@
       }
 
       const asset = pickAsset(data.assets, os);
-      if (asset && asset.browser_download_url) {
+      const downloadUrl = (asset && asset.browser_download_url) || directDownloadUrl(os);
+      if (downloadUrl) {
         // Trigger download via hidden <a> tag — no target=_blank so mobile stays on page
         const a = document.createElement('a');
         a.style.display = 'none';
-        a.href = asset.browser_download_url;
+        a.href = downloadUrl;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
 
-        if (osLabel) osLabel.textContent = 'Downloading ' + data.tag_name + '...';
+        if (osLabel) osLabel.textContent = 'Downloading ' + (data ? data.tag_name : '') + '...';
         reset();
       } else {
         window.open(fallback, '_blank');
