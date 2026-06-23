@@ -304,24 +304,81 @@ jobs:
           echo "=== Verifying patch ==="
           grep -rn "1.5.14\|1.5.15" apps/mobile-expo/node_modules/expo-modules-core/android/ 2>/dev/null || true
           cat apps/mobile-expo/android/build.gradle
-      - name: Build Expo APK
+      - name: Patch Android build for size optimization
+        run: |
+          APP_BUILD=apps/mobile-expo/android/app/build.gradle
+          echo "=== Before patch ==="
+          cat "$APP_BUILD"
+          echo "=== Inserting ABI splits + packaging options ==="
+          # Use Python for reliable multi-line insertion
+          python3 -c "
+import re
+with open('$APP_BUILD', 'r') as f:
+    content = f.read()
+
+# Add splits block after 'android {'
+if 'splits' not in content:
+    splits_block = '''    splits {
+        abi {
+            enable true
+            reset()
+            include \"arm64-v8a\", \"armeabi-v7a\"
+            universalApk false
+        }
+    }'''
+    content = content.replace('android {', 'android {\n' + splits_block, 1)
+
+# Add packagingOptions before buildTypes if not present
+if 'packagingOptions' not in content:
+    pkg = '''    packagingOptions {
+        jniLibs {
+            useLegacyPackaging true
+        }
+    }
+'''
+    content = content.replace('    buildTypes {', pkg + '    buildTypes {', 1)
+
+with open('$APP_BUILD', 'w') as f:
+    f.write(content)
+"
+          echo "=== After patch ==="
+          cat "$APP_BUILD"
+      - name: Build Expo AAB (Play Store) and APKs
         run: |
           cd apps/mobile-expo/android
           chmod +x ./gradlew
           ./gradlew --version
-          ./gradlew assembleRelease
-      - name: Verify Expo APK exists
+          # Build AAB for Google Play (dynamic delivery, smallest download)
+          ./gradlew bundleRelease -x mergeReleaseNativeDebugMetadata
+          # Build ABI-split APKs for direct distribution
+          ./gradlew assembleRelease -x mergeReleaseNativeDebugMetadata
+      - name: Show build outputs and sizes
         run: |
-          ls -la apps/mobile-expo/android/app/build/outputs/apk/release/
-      - name: Rename Expo APK for release
+          echo "=== AAB ==="
+          ls -lh apps/mobile-expo/android/app/build/outputs/bundle/release/
+          echo "=== APKs ==="
+          ls -lh apps/mobile-expo/android/app/build/outputs/apk/release/
+      - name: Rename and stage artifacts
         run: |
           mkdir -p mobile-build
-          cp apps/mobile-expo/android/app/build/outputs/apk/release/app-release.apk mobile-build/Chimera-Expo-Android.apk
-      - name: Upload Expo APK artifact
+          # AAB for Play Store
+          cp apps/mobile-expo/android/app/build/outputs/bundle/release/app-release.aab mobile-build/Chimera-Android.aab
+          # APKs per architecture
+          for apk in apps/mobile-expo/android/app/build/outputs/apk/release/*; do
+            if [ -f "$apk" ]; then
+              echo "Found: $apk ($(du -h "$apk" | cut -f1))"
+              cp "$apk" mobile-build/
+            fi
+          done
+          # If no split APKs were produced, fall back to universal
+          if [ ! -f mobile-build/app-arm64-v8a-release.apk ] && [ -f apps/mobile-expo/android/app/build/outputs/apk/release/app-release.apk ]; then
+            cp apps/mobile-expo/android/app/build/outputs/apk/release/app-release.apk mobile-build/Chimera-Android-universal.apk
+          fi
+      - name: Upload mobile artifacts
         uses: actions/upload-artifact@v4
         with:
           name: chimera-android
-          path: mobile-build/Chimera-Expo-Android.apk
+          path: mobile-build/*
           if-no-files-found: error
 
   upload-mobile-assets:
