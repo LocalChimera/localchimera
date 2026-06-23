@@ -16,3 +16,24 @@
 [submodule "upstream/knowledge-catalog"]
 	path = upstream/knowledge-catalog
 	url = https://github.com/GoogleCloudPlatform/knowledge-catalog.git
+[submodule "upstream/nosana-kit"]
+	path = upstream/nosana-kit
+	url = https://github.com/nosana-ci/nosana-kit
+[submodule "upstream/heurist-miner-release"]
+	path = upstream/heurist-miner-release
+	url = https://github.com/heurist-network/miner-release
+[submodule "upstream/akash-provider"]
+	path = upstream/akash-provider
+	url = https://github.com/akash-network/provider
+[submodule "upstream/salad-job-queue-worker"]
+	path = upstream/salad-job-queue-worker
+	url = https://github.com/saladtechnologies/salad-cloud-job-queue-worker
+[submodule "upstream/lium-io"]
+	path = upstream/lium-io
+	url = https://github.com/Datura-ai/lium-io
+[submodule "upstream/targon"]
+	path = upstream/targon
+	url = https://github.com/manifold-inc/targon
+[submodule "upstream/byteleap-worker"]
+	path = upstream/byteleap-worker
+	url = https://github.com/byteleapai/byteleap-Worker
