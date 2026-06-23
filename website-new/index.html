@@ -548,13 +548,6 @@
 
   function isDebugApk(name) { return name.toLowerCase().includes('debug'); }
 
-  function directDownloadUrl(os) {
-    const base = 'https://github.com/LocalChimera/localchimera/releases/latest/download/';
-    if (os === 'android') return base + 'app-arm64-v8a-release.apk';
-    if (os === 'ios')     return base + 'Chimera-iOS.ipa';
-    return null;
-  }
-
   function pickAsset(assets, os) {
     if (!assets || !assets.length) return null;
     const names = assets.map(a => a.name);
@@ -680,7 +673,7 @@
       }
 
       const asset = pickAsset(data.assets, os);
-      const downloadUrl = (asset && asset.browser_download_url) || directDownloadUrl(os);
+      const downloadUrl = asset && asset.browser_download_url;
       if (downloadUrl) {
         // Trigger download via hidden <a> tag — no target=_blank so mobile stays on page
         const a = document.createElement('a');

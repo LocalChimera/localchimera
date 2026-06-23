@@ -27,7 +27,7 @@ export default function App() {
     initFrontend();
   }, []);
 
-  // Load model separately so a crash here doesn't kill the whole app init
+  // Load model on user request only — prevents startup crash from killing the app
   async function loadLLM() {
     if (modelStatus === 'loading') return;
     setModelStatus('loading');
@@ -48,10 +48,6 @@ export default function App() {
       setModelError(e.message || 'Failed to load model');
     }
   }
-
-  useEffect(() => {
-    loadLLM();
-  }, []);
 
   async function handleAIWrite(body) {
     if (!modelId) throw new Error('Model not loaded');
@@ -199,9 +195,16 @@ export default function App() {
         originWhitelist={['*']}
       />
       {/* Model status overlay */}
-      {modelStatus !== 'ready' && modelStatus !== 'idle' && (
+      {modelStatus !== 'ready' && (
         <View style={styles.overlay}>
-          {modelStatus === 'error' ? (
+          {modelStatus === 'idle' ? (
+            <>
+              <Text style={styles.overlayText}>AI is off-device</Text>
+              <TouchableOpacity onPress={loadLLM} style={styles.retryBtn}>
+                <Text style={styles.retryText}>Enable AI</Text>
+              </TouchableOpacity>
+            </>
+          ) : modelStatus === 'error' ? (
             <>
               <Text style={styles.overlayText}>Model load failed: {modelError}</Text>
               <TouchableOpacity onPress={loadLLM} style={styles.retryBtn}>
