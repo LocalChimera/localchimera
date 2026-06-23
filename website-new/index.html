@@ -393,7 +393,7 @@
         <div class="icon" style="background:rgba(251,191,36,.1);color:#fbbf24">i</div>
         <div>
           <div class="name">iOS</div>
-          <div class="meta">.tar.gz sideload</div>
+          <div class="meta">.ipa sideload</div>
         </div>
         <div class="arrow">→</div>
       </a>
@@ -401,7 +401,7 @@
         <div class="icon" style="background:rgba(251,191,36,.1);color:#fbbf24">A</div>
         <div>
           <div class="name">Android</div>
-          <div class="meta">.apk download</div>
+          <div class="meta">.apk / .aab download</div>
         </div>
         <div class="arrow">→</div>
       </a>
@@ -537,14 +537,17 @@
     if (!assets || !assets.length) return null;
     const names = assets.map(a => a.name);
     if (os === 'android') {
-      return assets.find(a => /chimera.*android.*\.apk$/i.test(a.name))
+      // Prefer per-arch split APKs, then universal APK, then AAB
+      return assets.find(a => /chimera.*arm64.*\.apk$/i.test(a.name))
+        || assets.find(a => /chimera.*android.*\.apk$/i.test(a.name))
         || assets.find(a => /android.*\.apk$/i.test(a.name))
-        || assets.find(a => a.name.toLowerCase().endsWith('.apk'));
+        || assets.find(a => a.name.toLowerCase().endsWith('.apk'))
+        || assets.find(a => a.name.toLowerCase().endsWith('.aab'));
     }
     if (os === 'ios') {
-      return assets.find(a => /chimera.*ios.*\.tar\.gz$/i.test(a.name))
-        || assets.find(a => /ios.*\.tar\.gz$/i.test(a.name))
-        || assets.find(a => a.name.toLowerCase().endsWith('.tar.gz') && a.name.toLowerCase().includes('ios'));
+      return assets.find(a => /chimera.*ios.*\.ipa$/i.test(a.name))
+        || assets.find(a => /ios.*\.ipa$/i.test(a.name))
+        || assets.find(a => a.name.toLowerCase().endsWith('.ipa'));
     }
     if (os === 'windows') {
       return assets.find(a => /chimera.*windows.*\.msi$/i.test(a.name))
