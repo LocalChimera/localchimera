@@ -28,16 +28,7 @@
       "versionCode": 10022
     },
     "plugins": [
-      [
-        "expo-build-properties",
-        {
-          "android": {
-            "minSdkVersion": 29,
-            "enableProguardInReleaseBuilds": true,
-            "enableShrinkResourcesInReleaseBuilds": true
-          }
-        }
-      ]
+      "@qvac/sdk/expo-plugin"
     ],
     "extra": {
       "qvac": {
