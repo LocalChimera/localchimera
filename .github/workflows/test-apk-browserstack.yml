@@ -48,9 +48,62 @@ jobs:
         run: node browserstack-smoke-test.js
         working-directory: scripts
 
-      - name: Upload test screenshots
+      - name: Upload test artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: browserstack-screenshots
-          path: scripts/screenshot-*.png
+          name: browserstack-test-artifacts
+          path: scripts/*
+
+      - name: Download BrowserStack session logs
+        if: always()
+        env:
+          BROWSERSTACK_USERNAME: ${{ secrets.BROWSERSTACK_USERNAME }}
+          BROWSERSTACK_ACCESS_KEY: ${{ secrets.BROWSERSTACK_ACCESS_KEY }}
+        run: |
+          echo "Fetching recent BrowserStack sessions for this build..."
+          BUILD_NAME="build-${{ github.run_id }}"
+          curl -s -u "$BROWSERSTACK_USERNAME:$BROWSERSTACK_ACCESS_KEY" \
+            "https://api-cloud.browserstack.com/app-automate/builds.json" > /tmp/bs_builds.json
+          python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+for build in data:
+    if build.get('automation_build', {}).get('name', '').startswith('build-'):
+        bid = build['automation_build']['hashed_id']
+        print(f'Found build: {bid}')
+        break
+else:
+    print('No matching build found')
+    sys.exit(0)
+" < /tmp/bs_builds.json > /tmp/bs_build_id.txt
+          BUILD_ID=$(cat /tmp/bs_build_id.txt | grep "Found build:" | awk '{print $3}')
+          if [ -n "$BUILD_ID" ]; then
+            curl -s -u "$BROWSERSTACK_USERNAME:$BROWSERSTACK_ACCESS_KEY" \
+              "https://api-cloud.browserstack.com/app-automate/builds/$BUILD_ID/sessions.json" > /tmp/bs_sessions.json
+            python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+for session in data:
+    sid = session['automation_session']['hashed_id']
+    print(f'Session: {sid}')
+" < /tmp/bs_sessions.json > /tmp/bs_session_ids.txt
+            mkdir -p browserstack-logs
+            while IFS= read -r line; do
+              SID=$(echo "$line" | awk '{print $2}')
+              if [ -n "$SID" ]; then
+                echo "Downloading logs for session $SID"
+                curl -s -u "$BROWSERSTACK_USERNAME:$BROWSERSTACK_ACCESS_KEY" \
+                  "https://api-cloud.browserstack.com/app-automate/sessions/$SID/logs" \
+                  -o "browserstack-logs/session-${SID}.log"
+              fi
+            done < /tmp/bs_session_ids.txt
+            ls -la browserstack-logs/
+          fi
+
+      - name: Upload BrowserStack logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browserstack-logs
+          path: browserstack-logs/*

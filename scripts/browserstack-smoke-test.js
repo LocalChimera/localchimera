@@ -127,6 +127,9 @@ async function runTest() {
     console.error('Test error:', e);
     failureReason = e.message;
   } finally {
+    const sessionId = browser.sessionId;
+    console.log("BrowserStack session ID:", sessionId);
+    try { fs.writeFileSync(path.join(__dirname, "session-id.txt"), sessionId || ""); } catch (e) {}
     await browser.deleteSession();
   }
 
