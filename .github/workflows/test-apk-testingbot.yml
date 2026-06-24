@@ -29,7 +29,7 @@ jobs:
           TESTINGBOT_SECRET: ${{ secrets.TESTINGBOT_SECRET }}
         run: |
           RESPONSE=$(curl -s -u "$TESTINGBOT_KEY:$TESTINGBOT_SECRET" \
-            -X POST "https://api.testingbot.com/v1/app-upload" \
+            -X POST "https://api.testingbot.com/v1/storage" \
             -F "file=@chimera.apk")
           echo "Upload response: $RESPONSE"
           APP_URL=$(echo "$RESPONSE" | python3 -c "import sys,json; print(json.load(sys.stdin)['app_url'])")

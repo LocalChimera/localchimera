@@ -18,7 +18,7 @@ jobs:
 
       - name: Download latest APK
         run: |
-          curl -sL -o chimera.apk \
+          curl -fsSL --retry 3 --max-time 120 -o chimera.apk \
             "https://github.com/LocalChimera/localchimera/releases/latest/download/app-arm64-v8a-release.apk"
           ls -lh chimera.apk
 
