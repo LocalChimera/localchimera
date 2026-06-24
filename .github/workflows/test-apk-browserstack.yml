@@ -1,0 +1,56 @@
+name: Test APK on BrowserStack
+
+on:
+  workflow_dispatch:
+  release:
+    types: [published]
+
+jobs:
+  browserstack-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Download latest APK
+        run: |
+          curl -sL -o chimera.apk \
+            "https://github.com/LocalChimera/localchimera/releases/latest/download/app-arm64-v8a-release.apk"
+          ls -lh chimera.apk
+
+      - name: Upload APK to BrowserStack
+        id: upload
+        env:
+          BROWSERSTACK_USERNAME: ${{ secrets.BROWSERSTACK_USERNAME }}
+          BROWSERSTACK_ACCESS_KEY: ${{ secrets.BROWSERSTACK_ACCESS_KEY }}
+        run: |
+          RESPONSE=$(curl -s -u "$BROWSERSTACK_USERNAME:$BROWSERSTACK_ACCESS_KEY" \
+            -X POST "https://api-cloud.browserstack.com/app-automate/upload" \
+            -F "file=@chimera.apk")
+          echo "Upload response: $RESPONSE"
+          APP_URL=$(echo "$RESPONSE" | python3 -c "import sys,json; print(json.load(sys.stdin)['app_url'])")
+          echo "app_url=$APP_URL" >> "$GITHUB_OUTPUT"
+
+      - name: Install test dependencies
+        run: npm install webdriverio
+        working-directory: scripts
+
+      - name: Run smoke test on real Android device
+        env:
+          BROWSERSTACK_USERNAME: ${{ secrets.BROWSERSTACK_USERNAME }}
+          BROWSERSTACK_ACCESS_KEY: ${{ secrets.BROWSERSTACK_ACCESS_KEY }}
+          BROWSERSTACK_APP_URL: ${{ steps.upload.outputs.app_url }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+        run: node browserstack-smoke-test.js
+        working-directory: scripts
+
+      - name: Upload test screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browserstack-screenshots
+          path: scripts/screenshot-*.png
