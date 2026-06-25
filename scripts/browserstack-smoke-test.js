@@ -2,32 +2,64 @@ const { remote } = require('webdriverio');
 const fs = require('fs');
 const path = require('path');
 
+async function createSession(retries = 3) {
+  const devices = [
+    { deviceName: 'Samsung Galaxy S22 5G', osVersion: '12.0' },
+    { deviceName: 'Google Pixel 7', osVersion: '13.0' },
+    { deviceName: 'Google Pixel 6', osVersion: '12.0' },
+    { deviceName: 'Samsung Galaxy S23 5G', osVersion: '13.0' },
+  ];
+
+  for (let attempt = 0; attempt < retries; attempt++) {
+    const device = devices[attempt % devices.length];
+    console.log(`\nAttempt ${attempt + 1}/${retries}: Trying device ${device.deviceName} (${device.osVersion})`);
+
+    try {
+      const browser = await remote({
+        user: process.env.BROWSERSTACK_USERNAME,
+        key: process.env.BROWSERSTACK_ACCESS_KEY,
+        hostname: 'hub-cloud.browserstack.com',
+        protocol: 'https',
+        port: 443,
+        path: '/wd/hub',
+        connectionRetryTimeout: 180000,
+        connectionRetryCount: 1,
+        capabilities: {
+          'bstack:options': {
+            osVersion: device.osVersion,
+            deviceName: device.deviceName,
+            projectName: 'Chimera',
+            buildName: `build-${process.env.GITHUB_RUN_ID || 'local'}`,
+            sessionName: 'Smoke test - Enable AI button',
+            debug: true,
+            networkLogs: true,
+            appiumVersion: '2.4.1',
+          },
+          'appium:app': process.env.BROWSERSTACK_APP_URL,
+          'appium:automationName': 'UiAutomator2',
+          'appium:newCommandTimeout': 120,
+          'appium:appWaitForLaunch': true,
+          'appium:appWaitDuration': 60000,
+        },
+      });
+      console.log(`Successfully connected on ${device.deviceName}`);
+      return browser;
+    } catch (e) {
+      console.log(`Attempt ${attempt + 1} failed: ${e.message}`);
+      if (attempt < retries - 1) {
+        console.log('Waiting 15s before retry...');
+        await new Promise(r => setTimeout(r, 15000));
+      }
+    }
+  }
+  throw new Error('Failed to create BrowserStack session after all retries');
+}
+
 async function runTest() {
   console.log('Starting BrowserStack smoke test...');
   console.log('App URL:', process.env.BROWSERSTACK_APP_URL);
 
-  const browser = await remote({
-    user: process.env.BROWSERSTACK_USERNAME,
-    key: process.env.BROWSERSTACK_ACCESS_KEY,
-    hostname: 'hub-cloud.browserstack.com',
-    protocol: 'https',
-    port: 443,
-    path: '/wd/hub',
-    connectionRetryTimeout: 120000,
-    capabilities: {
-      'bstack:options': {
-        osVersion: '12.0',
-        deviceName: 'Google Pixel 6',
-        projectName: 'Chimera',
-        buildName: `build-${process.env.GITHUB_RUN_ID || 'local'}`,
-        sessionName: 'Smoke test - Enable AI button',
-        debug: true,
-        networkLogs: true,
-      },
-      'appium:app': process.env.BROWSERSTACK_APP_URL,
-      'appium:automationName': 'UiAutomator2',
-    },
-  });
+  const browser = await createSession(4);
 
   let success = false;
   let failureReason = '';
