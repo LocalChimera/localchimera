@@ -48,9 +48,12 @@ jobs:
         run: node testingbot-smoke-test.js
         working-directory: scripts
 
-      - name: Upload test screenshots
+      - name: Upload test screenshots and logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: testingbot-screenshots
-          path: scripts/screenshot-*.png
+          path: |
+            scripts/screenshot-*.png
+            scripts/logcat.txt
+            scripts/page-source.xml

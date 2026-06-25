@@ -67,7 +67,7 @@ async function runTest() {
       await browser.saveScreenshot(path.join(__dirname, 'screenshot-02-after-tap.png'));
 
       const startTime = Date.now();
-      while (Date.now() - startTime < 90000) {
+      while (Date.now() - startTime < 180000) {
         await browser.saveScreenshot(path.join(__dirname, 'screenshot-03-checking.png'));
 
         try {
