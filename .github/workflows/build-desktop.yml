@@ -316,7 +316,7 @@ jobs:
       - name: Expo prebuild (Android)
         run: |
           cd apps/mobile-expo
-          npx expo prebuild --platform android --clean
+          npx --no-install expo prebuild --platform android --clean
       - name: Set Gradle Java home, heap, and downgrade Compose compiler
         run: |
           echo "org.gradle.java.home=$JAVA_HOME" >> apps/mobile-expo/android/gradle.properties
