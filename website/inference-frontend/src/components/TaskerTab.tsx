@@ -221,13 +221,11 @@ export default function TaskerTab({ provider, publicKeyHex, accountHash, onTx }:
               e.preventDefault();
               if (!canSign || !promptText.trim()) return;
               const consumerHash = sdk.PublicKey.fromHex(publicKeyHex).accountHash();
-              const providerHash = new Uint8Array(32);
-              const providerHex = '710891d723070984750be87eb1b5349b68d3ecf75d4070bb9e76b224b33c4e90';
-              for (let i = 0; i < 32; i++) providerHash[i] = parseInt(providerHex.substr(i * 2, 2), 16);
+              const zeroHash = new Uint8Array(32);
               const orderId = `order-${Date.now()}`;
               const result = await callEntryPointWithWallet(provider, publicKeyHex, CONTRACTS.inferenceMarket, 'create_job', {
                 consumer: sdk.CLValue.newCLByteArray(consumerHash.toBytes()),
-                provider: sdk.CLValue.newCLByteArray(providerHash),
+                provider: sdk.CLValue.newCLByteArray(zeroHash),
                 amount: sdk.CLValue.newCLUInt512(amountMotes),
                 provider_fee_bps: sdk.CLValue.newCLUint64('0'),
                 order_id: sdk.CLValue.newCLString(orderId),

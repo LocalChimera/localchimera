@@ -2,7 +2,6 @@ import React, { useState, useEffect, useRef } from 'react';
 import { StyleSheet, View, Text, ActivityIndicator } from 'react-native';
 import { WebView } from 'react-native-webview';
 import * as FileSystem from 'expo-file-system';
-import { loadModel, completion, BITNET_0_7B_INST_TQ2_0 } from '@qvac/sdk';
 
 const FRONTEND_URL = 'https://new.localchimera.com/inference/';
 
@@ -31,6 +30,7 @@ export default function App() {
     setModelStatus('loading');
     setModelError(null);
     try {
+      const { loadModel, BITNET_0_7B_INST_TQ2_0 } = await import('@qvac/sdk');
       const mid = await loadModel({
         modelSrc: BITNET_0_7B_INST_TQ2_0,
         modelType: 'llm',
@@ -83,6 +83,7 @@ export default function App() {
     const title = body.title?.trim() || '';
     const fullPrompt = `Write a wiki article${title ? ` titled "${title}"` : ''} about: ${prompt}`;
     const history = [{ role: 'user', content: fullPrompt }];
+    const { completion } = await import('@qvac/sdk');
     const result = completion({ modelId, history, stream: false });
     let generated = '';
     for await (const token of result.tokenStream) {
@@ -317,6 +318,7 @@ export default function App() {
     }
     const fullPrompt = `Write a comprehensive wiki page about: ${customPrompt || topic}`;
     const history = [{ role: 'user', content: fullPrompt }];
+    const { completion } = await import('@qvac/sdk');
     const result = completion({ modelId, history, stream: false });
     let generated = '';
     for await (const token of result.tokenStream) {

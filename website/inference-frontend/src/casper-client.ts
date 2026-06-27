@@ -17,12 +17,12 @@ export interface ContractConfig {
 }
 
 export const CONTRACTS: ContractConfig = {
-  inferenceMarket: 'd19feffe13c397aaeee6278c2789b886ea978e681ac36eafdfecf8caaa0de0fc',
+  inferenceMarket: '9d26a1353da754b478bd144b82b4642b562483da7565cd9f4e3e5dbb9e6b8afa',
   storageMarket: '9ebcfa010b03d558bd2100ea47b65c5e3fdbb7a51a32f7288b383cdd0318911f',
   computeMarket: '3317e67a53dce2277ed3be64b78a94abf87f2dea97e7456bc59045faa9d7e533',
   bandwidthMarket: 'a8c075a8724264c3a28fc662f51a427c53ece4e271e692ac03bb88654be6058a',
   computeRegistry: 'bed17bda7a3597725a5d19531faae67bd2f68f08be17d02ea36a6830be2fc152',
-  escrowVault: '0000000000000000000000000000000000000000000000000000000000000000',
+  escrowVault: '9d26a1353da754b478bd144b82b4642b562483da7565cd9f4e3e5dbb9e6b8afa',
 };
 
 let rpcClient: any = null;

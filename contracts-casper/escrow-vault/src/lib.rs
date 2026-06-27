@@ -462,11 +462,45 @@ pub extern "C" fn create_job() {
     write_dict(jobs_dict, &format!("{}:provider_fee_bps", job_id), provider_fee_bps);
     write_dict(jobs_dict, &format!("{}:created_at", job_id), now);
 
-    // Auto-assign: if provider is all zeros, skip pending and go straight to ASSIGNED
+    // Auto-assign: if provider is all zeros, query compute registry for a registered provider
     let is_auto_assign = provider == AccountHash::default();
+    let mut assigned_provider = provider;
     if is_auto_assign {
+        // Call compute registry to get list of registered providers
+        let cr_key = runtime::get_key(COMPUTE_REGISTRY)
+            .unwrap_or_revert_with(ApiError::MissingKey);
+        let cr_hash = cr_key.into_hash_addr().unwrap_or_revert_with(ApiError::User(20));
+        let cr_contract_hash = ContractHash::new(cr_hash);
+        let providers_str: String = runtime::call_contract(cr_contract_hash, "get_providers", RuntimeArgs::new());
+        if !providers_str.is_empty() {
+            // Pick the first provider from the list
+            let first = providers_str.split(',').next().unwrap_or("");
+            if !first.is_empty() {
+                // Parse account hash from string format "account-hash-xxxx"
+                let hex = first.strip_prefix("account-hash-").unwrap_or(first);
+                let mut bytes = [0u8; 32];
+                let hex_bytes = hex.as_bytes();
+                for i in 0..32 {
+                    let hi = (hex_bytes[i * 2] as char).to_digit(16).unwrap_or(0) as u8;
+                    let lo = (hex_bytes[i * 2 + 1] as char).to_digit(16).unwrap_or(0) as u8;
+                    bytes[i] = (hi << 4) | lo;
+                }
+                assigned_provider = AccountHash::new(bytes);
+                // Update the provider field with the assigned provider
+                write_dict(jobs_dict, &format!("{}:provider", job_id), assigned_provider);
+            }
+        }
         write_dict(jobs_dict, &format!("{}:state", job_id), STATE_ASSIGNED);
         write_dict(jobs_dict, &format!("{}:acked_at", job_id), now);
+
+        // Add to assigned provider's job list
+        let provider_jobs_dict = get_dict(PROVIDER_JOBS);
+        let mut provider_list: Vec<String> = read_dict(provider_jobs_dict, &assigned_provider.to_string())
+            .unwrap_or_default();
+        if !provider_list.contains(&job_id) {
+            provider_list.push(job_id.clone());
+            write_dict(provider_jobs_dict, &assigned_provider.to_string(), provider_list);
+        }
     } else {
         write_dict(jobs_dict, &format!("{}:state", job_id), STATE_PENDING);
     }
@@ -1340,7 +1374,8 @@ pub extern "C" fn get_job() {
 
 #[no_mangle]
 pub extern "C" fn call() {
-    let compute_registry: AccountHash = runtime::get_named_arg("compute_registry");
+    let compute_registry_hash: [u8; 32] = runtime::get_named_arg("compute_registry");
+    let compute_registry: casper_types::HashAddr = compute_registry_hash;
     let reputation: AccountHash = runtime::get_named_arg("reputation");
     let owner: AccountHash = runtime::get_named_arg("owner");
     let protocol_fee_recipient: AccountHash = runtime::get_named_arg("protocol_fee_recipient");
@@ -1405,7 +1440,7 @@ pub extern "C" fn call() {
     }
 
     let mut named_keys = NamedKeys::new();
-    named_keys.insert(COMPUTE_REGISTRY.to_string(), Key::Account(compute_registry));
+    named_keys.insert(COMPUTE_REGISTRY.to_string(), Key::Hash(compute_registry));
     named_keys.insert(REPUTATION.to_string(), Key::Account(reputation));
     named_keys.insert(OWNER.to_string(), Key::Account(owner));
     named_keys.insert(PROTOCOL_FEE_RECIPIENT.to_string(), Key::Account(protocol_fee_recipient));

@@ -8,7 +8,7 @@ const { PrivateKey, PublicKey, KeyAlgorithm, CLValue, Args, ContractHash, Stored
 const DEFAULT_RPC_URL = 'https://node.testnet.casper.network/rpc';
 
 const TESTNET_CONTRACTS = {
-  escrowVault: 'd19feffe13c397aaeee6278c2789b886ea978e681ac36eafdfecf8caaa0de0fc',
+  escrowVault: '9d26a1353da754b478bd144b82b4642b562483da7565cd9f4e3e5dbb9e6b8afa',
   computeRegistry: 'bed17bda7a3597725a5d19531faae67bd2f68f08be17d02ea36a6830be2fc152',
   orderBook: 'cecfc698508213f63e7e7fe6f0729b090af23c87c7e444db7fc90be73736e399',
   reputation: 'fd0bf02161433c13c3070b7d0ea383c976bcbc799413638b4fedc703d4efa1db',
