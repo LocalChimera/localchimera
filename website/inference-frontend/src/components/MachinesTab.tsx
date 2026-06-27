@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { Card, Badge } from './ui';
 import { RefreshCw, Brain, HardDrive, Cpu, Wifi, Server } from 'lucide-react';
 import { CONTRACTS, getContractNamedKeys, queryDictionary } from '../casper-client';
+import { PublicKey } from 'casper-js-sdk';
 
 interface Machine {
   market: string;
@@ -22,32 +23,41 @@ export default function MachinesTab() {
     const all: Machine[] = [];
 
     try {
-      // Inference providers — scan first 50 possible account hashes is not feasible,
-      // so we iterate by checking known provider registry pattern: try sequential indices
-      const imKeys = await getContractNamedKeys(CONTRACTS.inferenceMarket);
-      const imProvidersUref = imKeys['im_providers'];
-      if (imProvidersUref) {
-        // Providers are keyed by account hash, which we can't enumerate.
-        // Try common test accounts — just check if the admin key is registered.
-        const testHashes = [
-          '020227d8dd5ccaa600e45b36e598d90ef8c26b6c67ef81bdfebde8fa583997a91ea5',
-        ];
-        for (const pkHex of testHashes) {
+      // Inference providers — from compute registry
+      const crKeys = await getContractNamedKeys(CONTRACTS.computeRegistry);
+      const providersListUref = crKeys['providers_list'];
+      const providersNameUref = crKeys['providers_name'];
+      const providersStatusUref = crKeys['providers_status'];
+      const providersGpuUref = crKeys['providers_gpu'];
+      const providersVramUref = crKeys['providers_vram'];
+      const providersCpuUref = crKeys['providers_cpu_cores'];
+      const providersRamUref = crKeys['providers_ram'];
+      const providersModelsUref = crKeys['providers_models'];
+      const providersServiceUref = crKeys['providers_service_type'];
+      const stakesUref = crKeys['stakes'];
+      if (providersListUref) {
+        const list = await queryDictionary(providersListUref, 'list');
+        const providerHashes: string[] = Array.isArray(list) ? list as string[] : [];
+        for (const ph of providerHashes) {
           try {
-            const { PublicKey } = await import('casper-js-sdk');
-            const pk = PublicKey.fromHex(pkHex);
-            const hashHex = pk.accountHash().toHex();
-            const status = await queryDictionary(imProvidersUref, `${hashHex}:status`);
-            if (status !== null && status !== undefined) {
-              all.push({
-                market: 'Inference', marketIcon: 'brain',
-                address: pkHex.slice(0, 12) + '...',
-                name: String(await queryDictionary(imProvidersUref, `${hashHex}:name`) || 'Unknown'),
-                status: String(status) === '1' ? 'active' : 'paused',
-                specs: `GPU: ${Boolean(await queryDictionary(imProvidersUref, `${hashHex}:gpu`))} · VRAM: ${String(await queryDictionary(imProvidersUref, `${hashHex}:vram`) || '0')}MB`,
-                stake: String(await queryDictionary(imProvidersUref, `${hashHex}:stake`) || '0'),
-              });
-            }
+            const status = await queryDictionary(providersStatusUref, ph);
+            if (status === null || status === undefined) continue;
+            const name = String(await queryDictionary(providersNameUref, ph) || 'Unknown');
+            const gpu = await queryDictionary(providersGpuUref, ph);
+            const vram = String(await queryDictionary(providersVramUref, ph) || '0');
+            const cpu = String(await queryDictionary(providersCpuUref, ph) || '0');
+            const ram = String(await queryDictionary(providersRamUref, ph) || '0');
+            const models = String(await queryDictionary(providersModelsUref, ph) || '');
+            const stake = String(await queryDictionary(stakesUref, ph) || '0');
+            const stakeCSPR = (Number(stake) / 1e9).toFixed(2);
+            all.push({
+              market: 'Inference', marketIcon: 'brain',
+              address: ph.slice(0, 20) + '...',
+              name,
+              status: String(status) === '1' ? 'active' : 'paused',
+              specs: `CPU: ${cpu} · GPU: ${Boolean(gpu)} · RAM: ${ram}MB${models ? ' · Models: ' + models.slice(0, 30) : ''}`,
+              stake: stakeCSPR + ' CSPR',
+            });
           } catch {}
         }
       }

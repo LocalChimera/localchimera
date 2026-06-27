@@ -83,6 +83,14 @@ jobs:
         run: node testingbot-smoke-test.js
         working-directory: scripts
 
+      - name: List test output files
+        if: always()
+        run: |
+          echo "=== Files in scripts/ ==="
+          ls -la scripts/screenshot-*.png scripts/logcat*.txt scripts/page-source*.xml 2>&1 || echo "No matching files found"
+          echo "=== All files in scripts/ ==="
+          ls -la scripts/ 2>&1
+
       - name: Upload test screenshots and logs
         if: always()
         uses: actions/upload-artifact@v4
@@ -92,3 +100,4 @@ jobs:
             scripts/screenshot-*.png
             scripts/logcat*.txt
             scripts/page-source*.xml
+          if-no-files-found: ignore

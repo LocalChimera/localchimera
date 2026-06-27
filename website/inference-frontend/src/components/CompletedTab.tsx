@@ -13,7 +13,7 @@ interface CompletedTask {
 }
 
 const JOB_STATUS: Record<string, string> = {
-  '0': 'pending', '1': 'acknowledged', '2': 'completed', '3': 'confirmed',
+  '0': 'pending', '1': 'assigned', '2': 'provider_done', '3': 'confirmed',
   '4': 'paid', '5': 'refunded', '6': 'disputed', '7': 'resolved',
 };
 
@@ -36,17 +36,20 @@ export default function CompletedTab() {
     try {
       // Inference — completed, confirmed, paid, resolved, refunded
       const imKeys = await getContractNamedKeys(CONTRACTS.inferenceMarket);
-      const jobsUref = imKeys['im_jobs'];
-      if (jobsUref) {
-        for (let i = 0; i < 20; i++) {
-          const id = `job-${i}`;
-          const status = await queryDictionary(jobsUref, `${id}:status`);
-          if (status === null || status === undefined) continue;
-          const statusStr = JOB_STATUS[String(status)] || String(status);
-          if (!['completed', 'confirmed', 'paid', 'resolved', 'refunded'].includes(statusStr)) continue;
+      const jobsUref = imKeys['jobs_dict'];
+      const pendingUref = imKeys['pending_jobs'];
+      if (jobsUref && pendingUref) {
+        const pendingList = await queryDictionary(pendingUref, 'list');
+        const jobIds: string[] = Array.isArray(pendingList) ? pendingList as string[] : [];
+        for (const id of jobIds) {
+          const state = await queryDictionary(jobsUref, `${id}:state`);
+          if (state === null || state === undefined) continue;
+          const stateNum = Number(state);
+          // Show jobs that are provider_done (2) or beyond
+          if (stateNum < 2) continue;
+          const statusStr = JOB_STATUS[String(stateNum)] || String(stateNum);
           const amount = Number(await queryDictionary(jobsUref, `${id}:amount`) || '0');
-          const maxTokens = String(await queryDictionary(jobsUref, `${id}:max_tokens`) || '0');
-          all.push({ id, market: 'Inference', marketIcon: 'brain', amount, status: statusStr, details: `${maxTokens} max tokens` });
+          all.push({ id, market: 'Inference', marketIcon: 'brain', amount, status: statusStr, details: `${id.slice(0, 30)}...` });
         }
       }
 
