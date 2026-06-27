@@ -91,7 +91,7 @@ export class CasperEscrowBridge {
   }
 
   get chainName() {
-    return this.config.chainName || process.env.CASPER_CHAIN_NAME || 'casper';
+    return this.config.chainName || process.env.CASPER_CHAIN_NAME || 'casper-test';
   }
 
   get contracts() {
@@ -257,6 +257,16 @@ export class CasperEscrowBridge {
         return;
       }
 
+      // Skip zero-provider jobs in PENDING state — the current contract requires
+      // provider_ack to be called by the assigned provider, and zero-provider jobs
+      // have no assigned provider. Only ASSIGNED zero-provider jobs (auto-assigned
+      // by a newer contract version) can be completed directly.
+      if (isZeroProvider && state === STATE.PENDING) {
+        this.logger.debug(`Job ${jobId} has zero provider in PENDING state, skipping (no auto-assign in this contract version)`);
+        this.processedJobs.add(jobId);
+        return;
+      }
+
       // Auto-assigned jobs: provider is zero, state should be ASSIGNED
       // Skip provider_ack and go straight to inference + provider_complete
       if (isZeroProvider && state === STATE.ASSIGNED) {
@@ -282,9 +292,28 @@ export class CasperEscrowBridge {
         return;
       }
 
-      // Non-auto-assigned jobs: only handle jobs assigned to us in pending state
+      // Non-auto-assigned jobs: only handle jobs assigned to us
       if (!isZeroProvider && providerHex !== this.providerAccountHash) {
         this.logger.debug(`Job ${jobId} not assigned to us`);
+        return;
+      }
+
+      // If already ASSIGNED, skip provider_ack and go straight to inference + complete
+      if (state === STATE.ASSIGNED) {
+        this.logger.info(`Job ${jobId} already ASSIGNED, completing directly...`);
+
+        const requestHash = await getDictionaryItem(this.rpcUrl, this.contracts.escrowVault, 'jobs_dict', `${jobId}:request_hash`);
+        this.logger.info(`Job ${jobId} request: ${requestHash}`);
+
+        const inferenceResult = await this.runInference(requestHash || jobId);
+        const responseHash = stringToHash(JSON.stringify(inferenceResult));
+        this.logger.info(`Job ${jobId} response hash: ${responseHash}`);
+
+        await this.providerComplete(jobId, responseHash);
+        this.logger.info(`Job ${jobId} completed, awaiting consumer confirmation...`);
+
+        this.processedJobs.add(jobId);
+        this.monitorJobSettlement(jobId);
         return;
       }
 
@@ -294,7 +323,12 @@ export class CasperEscrowBridge {
       }
 
       this.logger.info(`Accepting job ${jobId}...`);
-      await this.providerAck(jobId);
+      const ackDeployHash = await this.providerAck(jobId);
+
+      // Wait for provider_ack to be confirmed on-chain before proceeding
+      this.logger.info(`Waiting for ack to confirm (deploy ${ackDeployHash})...`);
+      await this.waitForDeploy(ackDeployHash, 60);
+      this.logger.info(`Ack confirmed for ${jobId}`);
 
       // Get the request hash (order_id/prompt)
       const requestHash = await getDictionaryItem(this.rpcUrl, this.contracts.escrowVault, 'jobs_dict', `${jobId}:request_hash`);
@@ -395,11 +429,33 @@ export class CasperEscrowBridge {
 
   // --- Transaction helpers ---
 
+  async waitForDeploy(deployHash, maxWaitSec = 60) {
+    const startTime = Date.now();
+    while (Date.now() - startTime < maxWaitSec * 1000) {
+      try {
+        const res = await rpcCall(this.rpcUrl, 'info_get_deploy', { deploy_hash: deployHash });
+        const results = res.result?.execution_results || [];
+        if (results.length > 0) {
+          const result = results[0]?.result;
+          if (result && 'Success' in result) return true;
+          if (result && 'Failure' in result) {
+            throw new Error(`Deploy ${deployHash} failed: ${JSON.stringify(result.Failure)}`);
+          }
+        }
+      } catch (e) {
+        // Deploy might not be found yet, keep waiting
+      }
+      await new Promise(r => setTimeout(r, 3000));
+    }
+    throw new Error(`Deploy ${deployHash} not confirmed within ${maxWaitSec}s`);
+  }
+
   async providerAck(jobId) {
-    await this.sendDeploy(this.contracts.escrowVault, 'provider_ack', {
+    const hash = await this.sendDeploy(this.contracts.escrowVault, 'provider_ack', {
       job_id: CLValue.newCLString(jobId),
     });
     this.logger.info(`provider_ack sent for ${jobId}`);
+    return hash;
   }
 
   async providerComplete(jobId, responseHash) {
@@ -417,7 +473,22 @@ export class CasperEscrowBridge {
     this.logger.info(`claim_payment sent for ${jobId}`);
   }
 
-  async sendDeploy(contractHash, entryPoint, argsMap, payment = '10000000000') {
+  async sendDeploy(contractHash, entryPoint, argsMap, payment = '1000000000') {
+    // Drain protection: only allow specific entry points on the escrow vault contract
+    const ALLOWED_ENTRY_POINTS = new Set(['provider_ack', 'provider_complete', 'claim_payment']);
+    const ALLOWED_CONTRACTS = new Set(Object.values(this.contracts));
+    const MAX_PAYMENT = '5000000000'; // 5 CSPR max per deploy
+
+    if (!ALLOWED_ENTRY_POINTS.has(entryPoint)) {
+      throw new Error(`Blocked: entry point "${entryPoint}" is not in the whitelist`);
+    }
+    if (!ALLOWED_CONTRACTS.has(contractHash)) {
+      throw new Error(`Blocked: contract ${contractHash} is not in the whitelist`);
+    }
+    if (BigInt(payment) > BigInt(MAX_PAYMENT)) {
+      throw new Error(`Blocked: payment ${payment} exceeds max ${MAX_PAYMENT}`);
+    }
+
     if (this.useRelay) {
       return this.sendViaRelay(contractHash, entryPoint, argsMap, payment);
     }

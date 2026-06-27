@@ -18,26 +18,27 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Download latest APK from Build Mobile APK workflow
+      - name: Download latest release APK (same as users download)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Find the latest successful Build Mobile APK run and download its artifact
           AUTH="Authorization: token $GH_TOKEN"
-          RUN_ID=$(curl -s -H "$AUTH" -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/LocalChimera/localchimera/actions/workflows/build-mobile.yml/runs?status=success&per_page=1" \
-            | python3 -c "import sys,json; print(json.load(sys.stdin)['workflow_runs'][0]['id'])")
-          echo "Latest successful Build Mobile APK run: $RUN_ID"
-          ARTIFACT_ID=$(curl -s -H "$AUTH" -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/LocalChimera/localchimera/actions/runs/$RUN_ID/artifacts" \
-            | python3 -c "import sys,json; print(json.load(sys.stdin)['artifacts'][0]['id'])")
-          echo "Artifact ID: $ARTIFACT_ID"
-          curl -s -L -H "$AUTH" -H "Accept: application/vnd.github+json" \
-            -o chimera-apk.zip \
-            "https://api.github.com/repos/LocalChimera/localchimera/actions/artifacts/$ARTIFACT_ID/zip"
-          file chimera-apk.zip
-          unzip -o chimera-apk.zip
-          mv app-debug.apk chimera.apk 2>/dev/null || mv *.apk chimera.apk
+          # Get the latest release that has APK assets
+          APK_URL=$(curl -s -H "$AUTH" -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/LocalChimera/localchimera/releases?per_page=20" \
+            | python3 -c "
+          import sys, json, re
+          data = json.load(sys.stdin)
+          withAssets = [r for r in data if r.get('assets')]
+          withAssets.sort(key=lambda r: r['created_at'], reverse=True)
+          for rel in withAssets:
+            for a in rel['assets']:
+              if 'arm64' in a['name'].lower() and a['name'].endswith('.apk') and 'debug' not in a['name'].lower():
+                print(a['browser_download_url'])
+                sys.exit(0)
+          ")
+          echo "Downloading APK from: $APK_URL"
+          curl -s -L -H "$AUTH" -o chimera.apk "$APK_URL"
           echo "Downloaded APK:"
           ls -lh chimera.apk
 

@@ -9,6 +9,7 @@ const FRONTEND_URL = 'https://new.localchimera.com/inference/';
 export default function App() {
   const [modelStatus, setModelStatus] = useState('idle');
   const [frontendUri, setFrontendUri] = useState(null);
+  const [webError, setWebError] = useState(null);
   const [modelId, setModelId] = useState(null);
   const [modelError, setModelError] = useState(null);
   const [walletAddress, setWalletAddress] = useState(null);
@@ -714,6 +715,16 @@ export default function App() {
     );
   }
 
+  if (webError) {
+    return (
+      <View style={styles.container}>
+        <Text style={[styles.text, { color: '#ff6b6b', marginBottom: 16 }]}>Failed to load frontend</Text>
+        <Text style={[styles.text, { fontSize: 12, color: '#7a7468' }]}>{webError}</Text>
+        <Text style={[styles.text, { marginTop: 16, color: '#00e5ff' }]} onPress={() => { setWebError(null); setFrontendUri(null); }}>Retry</Text>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
       <WebView
@@ -730,6 +741,19 @@ export default function App() {
         sharedCookiesEnabled={true}
         thirdPartyCookiesEnabled={true}
         allowsInlineMediaPlayback={true}
+        onError={(e) => {
+          console.error('WebView error:', e.nativeEvent);
+          setWebError('WebView error: ' + (e.nativeEvent.description || 'unknown'));
+        }}
+        onHttpError={(e) => {
+          console.error('WebView HTTP error:', e.nativeEvent);
+          setWebError('HTTP ' + (e.nativeEvent.statusCode || 'error'));
+        }}
+        renderError={(errorName) => (
+          <View style={styles.container}>
+            <Text style={[styles.text, { color: '#ff6b6b' }]}>WebView render error: {errorName}</Text>
+          </View>
+        )}
         onShouldStartLoadWithRequest={(request) => {
           // Allow Privy OAuth redirects — don't block navigation to auth domains
           const url = request.url || '';
