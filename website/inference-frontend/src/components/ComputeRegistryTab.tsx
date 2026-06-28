@@ -136,21 +136,48 @@ export default function ComputeRegistryTab({ provider, publicKeyHex, contractHas
               });
 
               // Step 2: Wait for registration to confirm, then update provider capacity
-              // with machine specs (model, gpu, vram)
+              // for all resource types (inference, storage, compute, bandwidth)
               try {
-                // Wait ~15s for the registration deploy to be processed
                 await new Promise(r => setTimeout(r, 15000));
-                const capacityResult = await callEntryPointWithWallet(
-                  provider, publicKeyHex, contractHash, 'update_provider_capacity',
-                  {
-                    resource_type: sdk.CLValue.newCLString('inference'),
-                    models: sdk.CLValue.newCLString(effectiveModel),
-                    gpu: sdk.CLValue.newCLValueBool(false),
-                    vram_mb: sdk.CLValue.newCLUint64('0'),
-                  },
-                  '5000000000',
-                );
-                onTx({ id: Date.now().toString(), deployHash: capacityResult.deployHash, entryPoint: 'update_provider_capacity', contract: 'ComputeRegistry', status: capacityResult.error ? 'error' : 'pending', error: capacityResult.error });
+                const cpuCores = String(navigator.hardwareConcurrency || 4);
+                const ramMb = String(((navigator as any).deviceMemory || 4) * 1024);
+
+                const resourceUpdates = [
+                  { resource_type: 'inference', models: effectiveModel, gpu: false, vram_mb: '0' },
+                  { resource_type: 'storage', total_capacity_mb: '10240' },
+                  { resource_type: 'compute', cpu_cores: cpuCores, ram_mb: ramMb, gpu: false, vram_mb: '0' },
+                  { resource_type: 'bandwidth', bandwidth_mbps: '100', service_type: 'proxy', or_port: '9001', dir_port: '9030' },
+                ];
+
+                for (const ru of resourceUpdates) {
+                  try {
+                    const args: Record<string, any> = { resource_type: sdk.CLValue.newCLString(ru.resource_type) };
+                    if (ru.resource_type === 'inference') {
+                      args.models = sdk.CLValue.newCLString(ru.models);
+                      args.gpu = sdk.CLValue.newCLValueBool(ru.gpu);
+                      args.vram_mb = sdk.CLValue.newCLUint64(ru.vram_mb);
+                    } else if (ru.resource_type === 'storage') {
+                      args.total_capacity_mb = sdk.CLValue.newCLUint64(ru.total_capacity_mb);
+                    } else if (ru.resource_type === 'compute') {
+                      args.cpu_cores = sdk.CLValue.newCLUint64(ru.cpu_cores);
+                      args.ram_mb = sdk.CLValue.newCLUint64(ru.ram_mb);
+                      args.gpu = sdk.CLValue.newCLValueBool(ru.gpu);
+                      args.vram_mb = sdk.CLValue.newCLUint64(ru.vram_mb);
+                    } else if (ru.resource_type === 'bandwidth') {
+                      args.bandwidth_mbps = sdk.CLValue.newCLUint64(ru.bandwidth_mbps);
+                      args.service_type = sdk.CLValue.newCLString(ru.service_type);
+                      args.or_port = sdk.CLValue.newCLUint64(ru.or_port);
+                      args.dir_port = sdk.CLValue.newCLUint64(ru.dir_port);
+                    }
+                    const result = await callEntryPointWithWallet(
+                      provider, publicKeyHex, contractHash, 'update_provider_capacity', args, '5000000000',
+                    );
+                    onTx({ id: Date.now().toString(), deployHash: result.deployHash, entryPoint: `update_provider_capacity (${ru.resource_type})`, contract: 'ComputeRegistry', status: result.error ? 'error' : 'pending', error: result.error });
+                    await new Promise(r => setTimeout(r, 5000));
+                  } catch (err: any) {
+                    console.error(`update_provider_capacity (${ru.resource_type}) failed:`, err.message);
+                  }
+                }
               } catch (err: any) {
                 console.error('update_provider_capacity failed:', err.message);
               }
@@ -188,8 +215,8 @@ export default function ComputeRegistryTab({ provider, publicKeyHex, contractHas
               )}
               {step !== 'idle' && (
                 <div className="text-xs text-blue-600">
-                  {step === 'registering' && 'Registering provider & updating machine specs...'}
-                  {step === 'done' && 'Done! Provider registered with model specs. Check transactions for status.'}
+                  {step === 'registering' && 'Registering provider & setting up all resource types (inference, storage, compute, bandwidth)...'}
+                  {step === 'done' && 'Done! Provider registered with all resource capacities. Check transactions for status.'}
                 </div>
               )}
               <Button type="submit" disabled={!canSign || !effectiveModel || !peerName.trim() || step === 'registering' || (hasMinStake && Number(stakeCSPR) < Number(minStakeCSPR))} className="w-full">

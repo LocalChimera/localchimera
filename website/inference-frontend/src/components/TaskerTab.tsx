@@ -236,7 +236,7 @@ export default function TaskerTab({ provider, publicKeyHex, accountHash, onTx }:
                 onTx({ id: Date.now().toString(), deployHash: result.deployHash, entryPoint: 'create_job', contract: 'InferenceMarket', status: result.error ? 'error' : 'pending', error: result.error });
               }
             };
-            const completedJobs = jobs.filter(j => j.state >= 3 && j.responseHash);
+            const completedJobs = jobs.filter(j => j.state >= 3 && j.responseHash && !j.requestHash?.startsWith('STORAGE:') && !j.requestHash?.startsWith('COMPUTE:') && !j.requestHash?.startsWith('BANDWIDTH:'));
             return <div className="space-y-3">
               <form onSubmit={handleSubmit} className="space-y-2">
                 <div className="text-xs text-muted-foreground flex items-center gap-1"><Brain className="h-3 w-3 text-[#00e5ff]" />Submit a prompt for inference. Router auto-assigns provider and model.</div>
@@ -264,10 +264,10 @@ export default function TaskerTab({ provider, publicKeyHex, accountHash, onTx }:
                   ))}
                 </div>
               )}
-              {jobs.length > 0 && jobs.filter(j => j.state < 3).length > 0 && (
+              {jobs.length > 0 && jobs.filter(j => j.state < 3 && !j.requestHash?.startsWith('STORAGE:') && !j.requestHash?.startsWith('COMPUTE:') && !j.requestHash?.startsWith('BANDWIDTH:')).length > 0 && (
                 <div className="space-y-1 mt-3 border-t border-white/10 pt-3">
                   <div className="text-xs font-semibold text-[#7a7468]">Pending Jobs</div>
-                  {jobs.filter(j => j.state < 3).map((job) => (
+                  {jobs.filter(j => j.state < 3 && !j.requestHash?.startsWith('STORAGE:') && !j.requestHash?.startsWith('COMPUTE:') && !j.requestHash?.startsWith('BANDWIDTH:')).map((job) => (
                     <div key={job.id} className="flex items-center justify-between text-xs bg-white/[0.02] rounded p-2 overflow-hidden">
                       <span className="font-mono text-[10px] text-[#7a7468] truncate flex-1 mr-2">{job.id}</span>
                       <span className="text-[#00e5ff] shrink-0">{job.status}</span>
@@ -281,180 +281,216 @@ export default function TaskerTab({ provider, publicKeyHex, accountHash, onTx }:
         )}
 
         {resource === 'storage' && (
-        <EntryPointCard title="Storage" contract="StorageMarket" contractHash={CONTRACTS.storageMarket} provider={provider} publicKeyHex={publicKeyHex} onTx={onTx}>
-          {({ submit }) => {
-            const [sizeGb, setSizeGb] = useState('1');
-            const [durationDays, setDurationDays] = useState('30');
-            const [redundancy, setRedundancy] = useState('standard');
+        <EntryPointCard title="Storage" contract="EscrowVault" contractHash={CONTRACTS.escrowVault} provider={provider} publicKeyHex={publicKeyHex} onTx={onTx}>
+          {() => {
             const [amount, setAmount] = useState('10');
-            const sizeMb = Math.floor(parseFloat(sizeGb || '0') * 1024).toString();
-            const expiryMs = String(Date.now() + parseInt(durationDays || '30') * 24 * 60 * 60 * 1000);
-            const shardConfig: Record<string, { data: string; parity: string }> = {
-              standard: { data: '3', parity: '1' }, high: { data: '5', parity: '2' }, minimal: { data: '2', parity: '1' },
-            };
-            const shards = shardConfig[redundancy] || shardConfig.standard;
+            const [fileDesc, setFileDesc] = useState('');
+            const [sizeMb, setSizeMb] = useState('100');
             const amountMotes = Math.floor(parseFloat(amount || '0') * 1e9).toString();
-            return <form onSubmit={(e) => { e.preventDefault(); submit('create_allocation', {
-              data_shards: sdk.CLValue.newCLUint64(shards.data),
-              parity_shards: sdk.CLValue.newCLUint64(shards.parity),
-              size_mb: sdk.CLValue.newCLUint64(sizeMb),
-              expiry_ms: sdk.CLValue.newCLUint64(expiryMs),
-              amount: sdk.CLValue.newCLUInt512(amountMotes),
-            }); }} className="space-y-2">
-              <div className="text-xs text-muted-foreground flex items-center gap-1"><HardDrive className="h-3 w-3 text-[#00e5ff]" />Reserve decentralized storage. Files are encrypted and sharded across providers.</div>
-              <Input label="Storage Size (GB)" value={sizeGb} onChange={setSizeGb} />
-              <Input label="Duration (days)" value={durationDays} onChange={setDurationDays} />
-              <div className="space-y-1">
-                <label className="text-sm font-medium">Redundancy</label>
-                <div className="flex gap-2">
-                  {Object.entries(shardConfig).map(([key]) => (
-                    <button key={key} type="button" onClick={() => setRedundancy(key)}
-                      className={`text-xs px-3 py-1.5 rounded-lg border transition-colors ${redundancy === key ? 'bg-[#00e5ff]/15 border-[#00e5ff]/30 text-[#00e5ff]' : 'bg-white/5 border-white/10 text-[#7a7468] hover:bg-white/10'}`}>
-                      {key === 'standard' ? 'Standard (3+1)' : key === 'high' ? 'High (5+2)' : 'Minimal (2+1)'}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <Input label="Funds (CSPR)" value={amount} onChange={setAmount} />
-              <Button type="submit" disabled={!canSign} className="w-full"><HardDrive className="h-4 w-4 mr-1" />Reserve Storage</Button>
-            </form>;
-          }}
-        </EntryPointCard>
-        )}
-
-        {resource === 'storage' && (
-        <EntryPointCard title="Store File" contract="StorageMarket" contractHash={CONTRACTS.storageMarket} provider={provider} publicKeyHex={publicKeyHex} onTx={onTx}>
-          {({ submit }) => {
-            const [allocId, setAllocId] = useState('');
-            const [selectedFile, setSelectedFile] = useState<File | null>(null);
-            const [uploading, setUploading] = useState(false);
-            const amountMotes = Math.floor(parseFloat('1') * 1e9).toString();
-            const activeAllocations = allocations.filter(a => a.status === '0' || a.status === '1');
-            const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-              const f = e.target.files?.[0] || null;
-              setSelectedFile(f);
-            };
             const handleSubmit = async (e: any) => {
               e.preventDefault();
-              if (!canSign || !allocId.trim() || !selectedFile) return;
-              setUploading(true);
-              try {
-                const fileBuffer = await selectedFile.arrayBuffer();
-                const hashBuffer = await crypto.subtle.digest('SHA-256', fileBuffer);
-                const hashArray = Array.from(new Uint8Array(hashBuffer));
-                const fileHash = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-                const sizeMb = String(Math.ceil(selectedFile.size / (1024 * 1024)));
-                submit('store_file', {
-                  alloc_id: sdk.CLValue.newCLString(allocId),
-                  file_hash: sdk.CLValue.newCLString(fileHash),
-                  size_mb: sdk.CLValue.newCLUint64(sizeMb),
-                  amount: sdk.CLValue.newCLUInt512(amountMotes),
-                });
-              } finally {
-                setUploading(false);
+              if (!canSign || !fileDesc.trim()) return;
+              const consumerHash = sdk.PublicKey.fromHex(publicKeyHex).accountHash();
+              const zeroHash = new Uint8Array(32);
+              const orderId = `STORAGE:${fileDesc.trim()}:${sizeMb}MB`;
+              const result = await callEntryPointWithWallet(provider, publicKeyHex, CONTRACTS.escrowVault, 'create_job', {
+                consumer: sdk.CLValue.newCLByteArray(consumerHash.toBytes()),
+                provider: sdk.CLValue.newCLByteArray(zeroHash),
+                amount: sdk.CLValue.newCLUInt512(amountMotes),
+                provider_fee_bps: sdk.CLValue.newCLUint64('0'),
+                order_id: sdk.CLValue.newCLString(orderId),
+              });
+              if (result.deployHash) {
+                onTx({ id: Date.now().toString(), deployHash: result.deployHash, entryPoint: 'create_job', contract: 'EscrowVault', status: result.error ? 'error' : 'pending', error: result.error });
               }
             };
-            return <form onSubmit={handleSubmit} className="space-y-2">
-              <div className="text-xs text-muted-foreground">Upload a file to your storage allocation. Hash is computed automatically.</div>
-              {activeAllocations.length > 0 && (
-                <div className="space-y-1">
-                  <label className="text-sm font-medium">Select Allocation</label>
-                  <div className="flex flex-wrap gap-1">
-                    {activeAllocations.map(a => (
-                      <button key={a.id} type="button" onClick={() => setAllocId(a.id)}
-                        className={`text-[10px] px-2 py-1 rounded font-mono ${allocId === a.id ? 'bg-[#00e5ff]/20 text-[#00e5ff]' : 'bg-white/5 text-[#7a7468] hover:bg-white/10'}`}>
-                        {a.id} ({a.sizeMb} MB)
-                      </button>
-                    ))}
-                  </div>
+            const completedJobs = jobs.filter(j => j.state >= 3 && j.responseHash && j.requestHash?.startsWith('STORAGE:'));
+            return <div className="space-y-3">
+              <form onSubmit={handleSubmit} className="space-y-2">
+                <div className="text-xs text-muted-foreground flex items-center gap-1"><HardDrive className="h-3 w-3 text-[#00e5ff]" />Request decentralized storage. Provider stores your data and returns a storage proof.</div>
+                <Input label="File Description / Hash" value={fileDesc} onChange={setFileDesc} placeholder="e.g. my-backup.tar.gz or sha256 hash" />
+                <Input label="Size (MB)" value={sizeMb} onChange={setSizeMb} />
+                <Input label="Funds (CSPR)" value={amount} onChange={setAmount} />
+                <Button type="submit" disabled={!canSign || !fileDesc.trim()} className="w-full"><HardDrive className="h-4 w-4 mr-1" />Request Storage</Button>
+              </form>
+              {completedJobs.length > 0 && (
+                <div className="space-y-2 mt-3 border-t border-white/10 pt-3">
+                  <div className="text-xs font-semibold text-[#00e5ff] flex items-center gap-1"><CheckCircle className="h-3 w-3" />Storage Results</div>
+                  {completedJobs.slice(-5).reverse().map((job) => (
+                    <div key={job.id} className="bg-white/[0.03] border border-white/10 rounded-lg p-3 space-y-2">
+                      {job.requestHash && (
+                        <div className="space-y-1">
+                          <div className="text-[10px] text-[#7a7468] font-semibold">Request</div>
+                          <div className="text-xs text-[#e8e2d8] whitespace-pre-wrap break-words">{job.requestHash}</div>
+                        </div>
+                      )}
+                      <div className="space-y-1">
+                        <div className="text-[10px] text-[#00e5ff] font-semibold">Storage Proof</div>
+                        <div className="text-xs text-[#e8e2d8] whitespace-pre-wrap break-words">{job.responseHash}</div>
+                      </div>
+                      <div className="text-[10px] text-[#7a7468]">Status: {job.status}</div>
+                    </div>
+                  ))}
                 </div>
               )}
-              {activeAllocations.length === 0 && (
-                <div className="text-xs text-amber-400">No active allocations. Reserve storage space first.</div>
-              )}
-              <div className="space-y-1">
-                <label className="text-sm font-medium">Upload File</label>
-                <div className="border border-white/10 rounded-lg p-4 text-center hover:border-[#00e5ff]/30 transition-colors">
-                  <input type="file" onChange={handleFileChange} className="hidden" id="file-upload" />
-                  <label htmlFor="file-upload" className="cursor-pointer flex flex-col items-center gap-2">
-                    <HardDrive className="h-6 w-6 text-[#7a7468]" />
-                    {selectedFile ? (
-                      <span className="text-xs text-[#00e5ff]">{selectedFile.name} ({(selectedFile.size / (1024 * 1024)).toFixed(2)} MB)</span>
-                    ) : (
-                      <span className="text-xs text-[#7a7468]">Click to select a file</span>
-                    )}
-                  </label>
+              {jobs.length > 0 && jobs.filter(j => j.state < 3 && j.requestHash?.startsWith('STORAGE:')).length > 0 && (
+                <div className="space-y-1 mt-3 border-t border-white/10 pt-3">
+                  <div className="text-xs font-semibold text-[#7a7468]">Pending Storage Jobs</div>
+                  {jobs.filter(j => j.state < 3 && j.requestHash?.startsWith('STORAGE:')).map((job) => (
+                    <div key={job.id} className="flex items-center justify-between text-xs bg-white/[0.02] rounded p-2 overflow-hidden">
+                      <span className="font-mono text-[10px] text-[#7a7468] truncate flex-1 mr-2">{job.id}</span>
+                      <span className="text-[#00e5ff] shrink-0">{job.status}</span>
+                    </div>
+                  ))}
                 </div>
-              </div>
-              <Button type="submit" disabled={!canSign || !allocId.trim() || !selectedFile || uploading} className="w-full"><Send className="h-4 w-4 mr-1" />{uploading ? 'Processing...' : 'Store File'}</Button>
-            </form>;
+              )}
+            </div>;
           }}
         </EntryPointCard>
         )}
 
         {resource === 'compute' && (
-        <EntryPointCard title="Compute" contract="ComputeMarket" contractHash={CONTRACTS.computeMarket} provider={provider} publicKeyHex={publicKeyHex} onTx={onTx}>
-          {({ submit }) => {
-            const [runtime, setRuntime] = useState('docker://ubuntu:latest');
-            const [maxCost, setMaxCost] = useState('100');
-            const [duration, setDuration] = useState('3600');
-            const [requiresGpu, setRequiresGpu] = useState(false);
-            const [minVram, setMinVram] = useState('0');
-            const maxCostMotes = Math.floor(parseFloat(maxCost || '0') * 1e9).toString();
-            return <form onSubmit={(e) => { e.preventDefault(); submit('create_demand', {
-              task_type: sdk.CLValue.newCLString('compute'),
-              runtime: sdk.CLValue.newCLString(runtime),
-              max_cost: sdk.CLValue.newCLUInt512(maxCostMotes),
-              duration_sec: sdk.CLValue.newCLUint64(duration),
-              requires_gpu: sdk.CLValue.newCLValueBool(requiresGpu),
-              min_vram_mb: sdk.CLValue.newCLUint64(minVram),
-            }); }} className="space-y-2">
-              <div className="text-xs text-muted-foreground flex items-center gap-1"><Cpu className="h-3 w-3 text-[#00e5ff]" />Request compute resources. Router auto-matches you with a provider.</div>
-              <Input label="Runtime (e.g. docker://ubuntu:latest)" value={runtime} onChange={setRuntime} />
-              <Input label="Max Cost (CSPR)" value={maxCost} onChange={setMaxCost} />
-              <Input label="Duration (seconds)" value={duration} onChange={setDuration} />
-              <div className="flex items-center gap-2">
-                <label className="text-sm flex items-center gap-2">
-                  <input type="checkbox" checked={requiresGpu} onChange={(e) => setRequiresGpu(e.target.checked)} className="rounded" />
-                  Requires GPU
-                </label>
-                {requiresGpu && <Input label="Min VRAM (MB)" value={minVram} onChange={setMinVram} />}
-              </div>
-              <Button type="submit" disabled={!canSign || !runtime.trim()} className="w-full"><Send className="h-4 w-4 mr-1" />Create Demand</Button>
-            </form>;
+        <EntryPointCard title="Compute" contract="EscrowVault" contractHash={CONTRACTS.escrowVault} provider={provider} publicKeyHex={publicKeyHex} onTx={onTx}>
+          {() => {
+            const [amount, setAmount] = useState('10');
+            const [codeDesc, setCodeDesc] = useState('');
+            const [runtime, setRuntime] = useState('wasm');
+            const amountMotes = Math.floor(parseFloat(amount || '0') * 1e9).toString();
+            const handleSubmit = async (e: any) => {
+              e.preventDefault();
+              if (!canSign || !codeDesc.trim()) return;
+              const consumerHash = sdk.PublicKey.fromHex(publicKeyHex).accountHash();
+              const zeroHash = new Uint8Array(32);
+              const orderId = `COMPUTE:${runtime}:${codeDesc.trim()}`;
+              const result = await callEntryPointWithWallet(provider, publicKeyHex, CONTRACTS.escrowVault, 'create_job', {
+                consumer: sdk.CLValue.newCLByteArray(consumerHash.toBytes()),
+                provider: sdk.CLValue.newCLByteArray(zeroHash),
+                amount: sdk.CLValue.newCLUInt512(amountMotes),
+                provider_fee_bps: sdk.CLValue.newCLUint64('0'),
+                order_id: sdk.CLValue.newCLString(orderId),
+              });
+              if (result.deployHash) {
+                onTx({ id: Date.now().toString(), deployHash: result.deployHash, entryPoint: 'create_job', contract: 'EscrowVault', status: result.error ? 'error' : 'pending', error: result.error });
+              }
+            };
+            const completedJobs = jobs.filter(j => j.state >= 3 && j.responseHash && j.requestHash?.startsWith('COMPUTE:'));
+            return <div className="space-y-3">
+              <form onSubmit={handleSubmit} className="space-y-2">
+                <div className="text-xs text-muted-foreground flex items-center gap-1"><Cpu className="h-3 w-3 text-[#00e5ff]" />Request compute resources. Provider executes your code and returns the output.</div>
+                <div className="space-y-1">
+                  <label className="text-sm font-medium">Runtime</label>
+                  <select value={runtime} onChange={(e) => setRuntime(e.target.value)}
+                    className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring">
+                    <option value="wasm">WebAssembly</option>
+                    <option value="docker">Docker</option>
+                    <option value="shell">Shell Script</option>
+                  </select>
+                </div>
+                <Input label="Code / Command" value={codeDesc} onChange={setCodeDesc} placeholder="e.g. echo 'Hello World' or script hash" />
+                <Input label="Funds (CSPR)" value={amount} onChange={setAmount} />
+                <Button type="submit" disabled={!canSign || !codeDesc.trim()} className="w-full"><Cpu className="h-4 w-4 mr-1" />Request Compute</Button>
+              </form>
+              {completedJobs.length > 0 && (
+                <div className="space-y-2 mt-3 border-t border-white/10 pt-3">
+                  <div className="text-xs font-semibold text-[#00e5ff] flex items-center gap-1"><CheckCircle className="h-3 w-3" />Compute Results</div>
+                  {completedJobs.slice(-5).reverse().map((job) => (
+                    <div key={job.id} className="bg-white/[0.03] border border-white/10 rounded-lg p-3 space-y-2">
+                      {job.requestHash && (
+                        <div className="space-y-1">
+                          <div className="text-[10px] text-[#7a7468] font-semibold">Request</div>
+                          <div className="text-xs text-[#e8e2d8] whitespace-pre-wrap break-words">{job.requestHash}</div>
+                        </div>
+                      )}
+                      <div className="space-y-1">
+                        <div className="text-[10px] text-[#00e5ff] font-semibold">Output</div>
+                        <div className="text-xs text-[#e8e2d8] whitespace-pre-wrap break-words">{job.responseHash}</div>
+                      </div>
+                      <div className="text-[10px] text-[#7a7468]">Status: {job.status}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {jobs.length > 0 && jobs.filter(j => j.state < 3 && j.requestHash?.startsWith('COMPUTE:')).length > 0 && (
+                <div className="space-y-1 mt-3 border-t border-white/10 pt-3">
+                  <div className="text-xs font-semibold text-[#7a7468]">Pending Compute Jobs</div>
+                  {jobs.filter(j => j.state < 3 && j.requestHash?.startsWith('COMPUTE:')).map((job) => (
+                    <div key={job.id} className="flex items-center justify-between text-xs bg-white/[0.02] rounded p-2 overflow-hidden">
+                      <span className="font-mono text-[10px] text-[#7a7468] truncate flex-1 mr-2">{job.id}</span>
+                      <span className="text-[#00e5ff] shrink-0">{job.status}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>;
           }}
         </EntryPointCard>
         )}
 
         {resource === 'bandwidth' && (
-        <EntryPointCard title="Bandwidth" contract="BandwidthMarket" contractHash={CONTRACTS.bandwidthMarket} provider={provider} publicKeyHex={publicKeyHex} onTx={onTx}>
+        <EntryPointCard title="Bandwidth" contract="EscrowVault" contractHash={CONTRACTS.escrowVault} provider={provider} publicKeyHex={publicKeyHex} onTx={onTx}>
           {() => {
+            const [amount, setAmount] = useState('10');
             const [durationHours, setDurationHours] = useState('1');
             const [dataGb, setDataGb] = useState('1');
-            const [amount, setAmount] = useState('10');
-            const maxDuration = String(parseInt(durationHours || '0') * 3600);
-            const maxData = String(Math.floor(parseFloat(dataGb || '0') * 1024));
             const amountMotes = Math.floor(parseFloat(amount || '0') * 1e9).toString();
             const handleSubmit = async (e: any) => {
               e.preventDefault();
               if (!canSign) return;
-              const result = await callEntryPointWithWallet(provider, publicKeyHex, CONTRACTS.bandwidthMarket, 'create_session', {
-                consumer_pubkey: sdk.CLValue.newCLString(publicKeyHex),
-                max_duration_sec: sdk.CLValue.newCLUint64(maxDuration),
-                max_data_mb: sdk.CLValue.newCLUint64(maxData),
+              const consumerHash = sdk.PublicKey.fromHex(publicKeyHex).accountHash();
+              const zeroHash = new Uint8Array(32);
+              const orderId = `BANDWIDTH:${durationHours}h:${dataGb}GB`;
+              const result = await callEntryPointWithWallet(provider, publicKeyHex, CONTRACTS.escrowVault, 'create_job', {
+                consumer: sdk.CLValue.newCLByteArray(consumerHash.toBytes()),
+                provider: sdk.CLValue.newCLByteArray(zeroHash),
                 amount: sdk.CLValue.newCLUInt512(amountMotes),
+                provider_fee_bps: sdk.CLValue.newCLUint64('0'),
+                order_id: sdk.CLValue.newCLString(orderId),
               });
               if (result.deployHash) {
-                onTx({ id: Date.now().toString(), deployHash: result.deployHash, entryPoint: 'create_session', contract: 'BandwidthMarket', status: result.error ? 'error' : 'pending', error: result.error });
+                onTx({ id: Date.now().toString(), deployHash: result.deployHash, entryPoint: 'create_job', contract: 'EscrowVault', status: result.error ? 'error' : 'pending', error: result.error });
               }
             };
-            return <form onSubmit={handleSubmit} className="space-y-2">
-              <div className="text-xs text-muted-foreground flex items-center gap-1"><Wifi className="h-3 w-3 text-[#00e5ff]" />Purchase bandwidth. Higher-paying requests get routed first.</div>
-              <Input label="Duration (hours)" value={durationHours} onChange={setDurationHours} />
-              <Input label="Data Allowance (GB)" value={dataGb} onChange={setDataGb} />
-              <Input label="Funds (CSPR)" value={amount} onChange={setAmount} />
-              <Button type="submit" disabled={!canSign} className="w-full"><Wifi className="h-4 w-4 mr-1" />Get Bandwidth</Button>
-            </form>;
+            const completedJobs = jobs.filter(j => j.state >= 3 && j.responseHash && j.requestHash?.startsWith('BANDWIDTH:'));
+            return <div className="space-y-3">
+              <form onSubmit={handleSubmit} className="space-y-2">
+                <div className="text-xs text-muted-foreground flex items-center gap-1"><Wifi className="h-3 w-3 text-[#00e5ff]" />Purchase bandwidth. Provider sets up a proxy/relay session and returns connection details.</div>
+                <Input label="Duration (hours)" value={durationHours} onChange={setDurationHours} />
+                <Input label="Data Allowance (GB)" value={dataGb} onChange={setDataGb} />
+                <Input label="Funds (CSPR)" value={amount} onChange={setAmount} />
+                <Button type="submit" disabled={!canSign} className="w-full"><Wifi className="h-4 w-4 mr-1" />Get Bandwidth</Button>
+              </form>
+              {completedJobs.length > 0 && (
+                <div className="space-y-2 mt-3 border-t border-white/10 pt-3">
+                  <div className="text-xs font-semibold text-[#00e5ff] flex items-center gap-1"><CheckCircle className="h-3 w-3" />Bandwidth Results</div>
+                  {completedJobs.slice(-5).reverse().map((job) => (
+                    <div key={job.id} className="bg-white/[0.03] border border-white/10 rounded-lg p-3 space-y-2">
+                      {job.requestHash && (
+                        <div className="space-y-1">
+                          <div className="text-[10px] text-[#7a7468] font-semibold">Request</div>
+                          <div className="text-xs text-[#e8e2d8] whitespace-pre-wrap break-words">{job.requestHash}</div>
+                        </div>
+                      )}
+                      <div className="space-y-1">
+                        <div className="text-[10px] text-[#00e5ff] font-semibold">Session Details</div>
+                        <div className="text-xs text-[#e8e2d8] whitespace-pre-wrap break-words">{job.responseHash}</div>
+                      </div>
+                      <div className="text-[10px] text-[#7a7468]">Status: {job.status}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {jobs.length > 0 && jobs.filter(j => j.state < 3 && j.requestHash?.startsWith('BANDWIDTH:')).length > 0 && (
+                <div className="space-y-1 mt-3 border-t border-white/10 pt-3">
+                  <div className="text-xs font-semibold text-[#7a7468]">Pending Bandwidth Jobs</div>
+                  {jobs.filter(j => j.state < 3 && j.requestHash?.startsWith('BANDWIDTH:')).map((job) => (
+                    <div key={job.id} className="flex items-center justify-between text-xs bg-white/[0.02] rounded p-2 overflow-hidden">
+                      <span className="font-mono text-[10px] text-[#7a7468] truncate flex-1 mr-2">{job.id}</span>
+                      <span className="text-[#00e5ff] shrink-0">{job.status}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>;
           }}
         </EntryPointCard>
         )}

@@ -28,9 +28,7 @@
       "versionCode": 10022,
       "softwareKeyboardLayoutMode": "resize"
     },
-    "plugins": [
-      "@qvac/sdk/expo-plugin"
-    ],
+    "plugins": [],
     "extra": {
       "qvac": {
         "modelsDir": "models",

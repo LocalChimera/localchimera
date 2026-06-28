@@ -18,43 +18,27 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Download Expo debug APK from Build Desktop Apps
+      - name: Download latest release APK
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           AUTH="Authorization: token $GH_TOKEN"
-          # Find the latest successful Build Desktop Apps run
-          RUN_ID=$(curl -s -H "$AUTH" -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/LocalChimera/localchimera/actions/workflows/build-desktop.yml/runs?status=success&per_page=5" \
+          APK_URL=$(curl -s -H "$AUTH" -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/LocalChimera/localchimera/releases?per_page=20" \
             | python3 -c "
           import sys, json
           data = json.load(sys.stdin)
-          for r in data['workflow_runs']:
-            if 'build-android' in str(r.get('jobs', [])) or True:
-              print(r['id'])
-              break
+          withAssets = [r for r in data if r.get('assets')]
+          withAssets.sort(key=lambda r: r['created_at'], reverse=True)
+          for rel in withAssets:
+            for a in rel['assets']:
+              if 'arm64' in a['name'].lower() and a['name'].endswith('.apk') and 'debug' not in a['name'].lower():
+                print(a['browser_download_url'])
+                sys.exit(0)
           ")
-          echo "Latest Build Desktop Apps run: $RUN_ID"
-          # Get the chimera-android artifact
-          ARTIFACT_ID=$(curl -s -H "$AUTH" -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/LocalChimera/localchimera/actions/runs/$RUN_ID/artifacts" \
-            | python3 -c "
-          import sys, json
-          data = json.load(sys.stdin)
-          for a in data['artifacts']:
-            if a['name'] == 'chimera-android':
-              print(a['id'])
-              break
-          ")
-          echo "Artifact ID: $ARTIFACT_ID"
-          curl -s -L -H "$AUTH" -o android-artifact.zip \
-            "https://api.github.com/repos/LocalChimera/localchimera/actions/artifacts/$ARTIFACT_ID/zip"
-          unzip -o android-artifact.zip -d android-apks
-          # Use debug APK for testing (no ProGuard, smaller)
-          ls -lh android-apks/
-          cp android-apks/app-arm64-v8a-debug.apk chimera.apk 2>/dev/null || \
-          cp android-apks/app-arm64-v8a-release.apk chimera.apk
-          echo "Using APK for testing:"
+          echo "Downloading APK from: $APK_URL"
+          curl -s -L -H "$AUTH" -o chimera.apk "$APK_URL"
+          echo "Downloaded APK:"
           ls -lh chimera.apk
 
       - name: Upload APK to TestingBot
