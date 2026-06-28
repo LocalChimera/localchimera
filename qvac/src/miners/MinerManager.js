@@ -2,7 +2,6 @@ import { Logger } from '../core/Logger.js';
 import { ChutesMiner } from './ChutesMiner.js';
 import { RoutstrMiner } from './RoutstrMiner.js';
 import { CasperEscrowBridge } from './CasperEscrowBridge.js';
-import { CasperUnifiedBridge } from './CasperUnifiedBridge.js';
 
 export class MinerManager {
   constructor(config, dataStore, taskMonitor = null, inferenceLayer = null) {
@@ -50,6 +49,7 @@ export class MinerManager {
         compute: this.config.casperUnified.config?.computeLayer || null,
         bandwidth: this.config.casperUnified.config?.bandwidthLayer || null,
       };
+      const { CasperUnifiedBridge } = await import('./CasperUnifiedBridge.js');
       const miner = new CasperUnifiedBridge(this.config.casperUnified.config, layers);
       await miner.initialize();
       this.miners.set('casperUnified', miner);
