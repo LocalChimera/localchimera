@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Chimera Console — Providers</title>
+  <link rel="icon" type="image/png" href="chimeralogo-header.png">
+  <style>
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    :root{
+      --bg:#f5f5f7;--panel:#ffffff;--text:#111111;--muted:#6b7280;--border:#e5e5e5;
+      --primary:#111111;--primary-text:#ffffff;--radius:14px;--radius-sm:10px;
+      --green:#22c55e;--red:#ef4444;--blue:#3b82f6;--orange:#f97316;--purple:#a855f7;
+    }
+    body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,ui-sans-serif,system-ui,sans-serif;background:var(--bg);color:var(--text);line-height:1.5;-webkit-font-smoothing:antialiased}
+    a{color:inherit;text-decoration:none}
+    button{font:inherit}
+    .btn{display:inline-flex;align-items:center;gap:8px;padding:10px 18px;border-radius:var(--radius-sm);font-size:13px;font-weight:600;transition:.15s;cursor:pointer;border:none}
+    .btn-primary{background:var(--primary);color:var(--primary-text)}
+    .btn-primary:hover{opacity:.85}
+    .btn-secondary{background:var(--panel);border:1px solid var(--border);color:var(--text)}
+    .btn-secondary:hover{background:#f5f5f7}
+    .btn-ghost{background:transparent;color:var(--muted)}
+    .btn-ghost:hover{color:var(--text)}
+    .app{display:flex;min-height:100vh}
+    .sidebar{width:240px;background:var(--panel);border-right:1px solid var(--border);display:flex;flex-direction:column;position:fixed;inset:0 auto 0 0;z-index:40}
+    .sidebar-header{height:64px;display:flex;align-items:center;gap:12px;padding:0 20px;border-bottom:1px solid var(--border)}
+    .sidebar-logo{width:32px;height:32px;border-radius:8px;overflow:hidden}
+    .sidebar-logo img{width:100%;height:100%;object-fit:cover}
+    .sidebar-brand{font-weight:800;font-size:18px;letter-spacing:-.02em}
+    .sidebar-nav{flex:1;padding:16px 12px;display:flex;flex-direction:column;gap:4px}
+    .nav-item{display:flex;align-items:center;gap:12px;padding:10px 12px;border-radius:var(--radius-sm);font-size:14px;font-weight:500;color:var(--muted);transition:.15s}
+    .nav-item:hover{background:#f5f5f7;color:var(--text)}
+    .nav-item.active{background:#f5f5f7;color:var(--text);font-weight:600}
+    .nav-item svg{width:18px;height:18px;flex-shrink:0}
+    .deploy-btn{margin:12px 16px 16px}
+    .main{flex:1;margin-left:240px;display:flex;flex-direction:column;min-height:100vh}
+    .topbar{height:64px;background:var(--panel);border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;padding:0 32px;position:sticky;top:0;z-index:30}
+    .breadcrumb{font-size:14px;color:var(--muted)}
+    .content{flex:1;padding:32px;max-width:1200px}
+    .page-title{font-size:28px;font-weight:700;letter-spacing:-.02em;margin-bottom:6px}
+    .page-subtitle{font-size:14px;color:var(--muted);margin-bottom:24px}
+    .panel{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:24px;margin-bottom:24px}
+    .panel-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:12px}
+    .panel-title{font-size:18px;font-weight:700}
+    .map-controls{display:flex;gap:8px;justify-content:center;margin-bottom:12px}
+    .map-btn{width:36px;height:36px;border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--panel);display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:18px;color:var(--text)}
+    .map-btn:hover{background:#f5f5f7}
+    .map-wrap{position:relative;border-radius:var(--radius);overflow:hidden;background:#f0f0f0;border:1px solid var(--border)}
+    .map-wrap svg{width:100%;height:auto;display:block}
+    .map-dot{fill:var(--red);animation:pulse 2s infinite}
+    @keyframes pulse{0%,100%{opacity:.7}50%{opacity:1}}
+    .stats-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-top:24px}
+    .stat-card{border:1px solid var(--border);border-radius:var(--radius);padding:20px;text-align:center}
+    .stat-label{font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.02em;margin-bottom:12px}
+    .stat-value{font-size:22px;font-weight:700;margin-bottom:4px}
+    .stat-detail{font-size:12px;color:var(--muted)}
+    .donut{width:120px;height:120px;border-radius:50%;margin:0 auto 16px;position:relative}
+    .donut-center{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:700}
+    .actions-bar{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:16px;flex-wrap:wrap}
+    .search-input{flex:1;max-width:320px;padding:10px 14px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:14px;outline:none;background:var(--panel)}
+    .search-input:focus{border-color:#999}
+    .sort-select{padding:10px 14px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:14px;background:var(--panel)}
+    table{width:100%;border-collapse:collapse;font-size:13px}
+    th,td{padding:12px 14px;text-align:left;border-bottom:1px solid var(--border)}
+    th{font-weight:600;color:var(--muted);font-size:12px;background:#fafafa}
+    tr:hover td{background:#fafafa}
+    .provider-name{font-weight:600;color:var(--text)}
+    .provider-host{font-size:12px;color:var(--muted)}
+    .badge{display:inline-flex;align-items:center;gap:4px;font-size:12px;padding:4px 8px;border-radius:20px;font-weight:600}
+    .badge-audited{background:#dcfce7;color:#166534}
+    .badge-pending{background:#fef3c7;color:#92400e}
+    .star{cursor:pointer;color:#d4d4d4;font-size:16px}
+    .star.active{color:#facc15}
+    .mobile-nav-btn{display:none;position:fixed;top:16px;left:16px;z-index:300;width:40px;height:40px;border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--panel);color:var(--text);font-size:20px;align-items:center;justify-content:center;cursor:pointer}
+    .mobile-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.25);z-index:90}
+    .mobile-overlay.open{display:block}
+    .modal{display:none;position:fixed;inset:0;z-index:200;align-items:center;justify-content:center;padding:20px;background:rgba(0,0,0,.25)}
+    .modal.open{display:flex}
+    .modal-card{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);width:100%;max-width:560px;max-height:80vh;overflow:auto;box-shadow:0 20px 60px rgba(0,0,0,.15)}
+    .modal-header{padding:20px 24px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+    .modal-title{font-size:18px;font-weight:700}
+    .modal-close{width:32px;height:32px;border-radius:50%;border:none;background:#f5f5f7;color:var(--text);cursor:pointer;font-size:18px;display:flex;align-items:center;justify-content:center}
+    .modal-body{padding:0}
+    .attr-row{display:grid;grid-template-columns:1fr 1fr auto;gap:12px;padding:14px 24px;border-bottom:1px solid var(--border);align-items:center;font-size:13px}
+    .attr-key{color:var(--text);font-weight:500}
+    .attr-val{color:var(--muted)}
+    .attr-auditor{background:#f5f5f7;padding:4px 10px;border-radius:20px;font-size:11px;font-weight:600;color:var(--text)}
+    .modal-footer{padding:16px 24px;border-top:1px solid var(--border);display:flex;justify-content:flex-end}
+    @media (max-width:900px){
+      .sidebar{transform:translateX(-100%);transition:transform .25s ease}
+      .sidebar.open{transform:translateX(0)}
+      .main{margin-left:0}
+      .content{padding:24px}
+      .mobile-nav-btn{display:flex}
+      .stats-grid{grid-template-columns:1fr 1fr}
+      .attr-row{grid-template-columns:1fr;gap:4px}
+    }
+    @media (max-width:600px){
+      .content{padding:16px}
+      .page-title{font-size:22px}
+      .stats-grid{grid-template-columns:1fr}
+      table{font-size:12px}
+      th,td{padding:10px 8px}
+    }
+  </style>
+</head>
+<body>
+
+<button class="mobile-nav-btn" id="mobileNavBtn" onclick="toggleMobileNav()" aria-label="Menu">☰</button>
+<div class="mobile-overlay" id="mobileNavOverlay" onclick="closeMobileNav()"></div>
+
+<div class="app">
+  <aside class="sidebar" id="sidebar">
+    <a href="index.html" class="sidebar-header">
+      <div class="sidebar-logo"><img src="chimeralogo-header.png" alt="Chimera"></div>
+      <div class="sidebar-brand">Chimera</div>
+    </a>
+    <nav class="sidebar-nav">
+      <a href="console.html" class="nav-item">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/></svg>
+        Home
+      </a>
+      <a href="deploy.html" class="nav-item">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>
+        Deploy
+      </a>
+      <a href="templates.html" class="nav-item">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"/></svg>
+        Templates
+      </a>
+      <a href="sdl-builder.html" class="nav-item">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+        SDL Builder
+      </a>
+      <a href="providers.html" class="nav-item active">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/></svg>
+        Providers
+      </a>
+      <a href="earnings.html" class="nav-item">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+        Earnings
+      </a>
+      <a href="demo-wiki.html" class="nav-item">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 20H5a2 2 0 01-2-2V6a2 2 0 012-2h10a2 2 0 012 2v1m2 13a2 2 0 01-2-2V7m2 13a2 2 0 002-2V9a2 2 0 00-2-2h-2m-4-3H9M7 16h6M7 8h6v4H7V8z"/></svg>
+        Wiki
+      </a>
+      <a href="https://github.com/LocalChimera/localchimera" target="_blank" rel="noopener" class="nav-item">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"/></svg>
+        GitHub
+      </a>
+    </nav>
+    <a href="deploy.html" class="btn btn-primary deploy-btn">
+      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>
+      Deploy
+    </a>
+  </aside>
+
+  <div class="main">
+    <header class="topbar">
+      <span class="breadcrumb">Providers</span>
+    </header>
+
+    <main class="content">
+      <h1 class="page-title">Network Capacity</h1>
+      <p class="page-subtitle">63 active providers on Mainnet</p>
+
+      <div class="panel">
+        <div class="map-controls">
+          <button class="map-btn" title="Zoom in">+</button>
+          <button class="map-btn" title="Zoom out">−</button>
+          <button class="map-btn" title="Refresh" onclick="renderDots()">↻</button>
+        </div>
+        <div class="map-wrap" id="mapWrap">
+          <svg viewBox="0 0 1000 500" preserveAspectRatio="xMidYMid meet">
+            <defs>
+              <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+                <feGaussianBlur stdDeviation="2.5" result="blur"/>
+                <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+              </filter>
+            </defs>
+            <!-- Stylized world continents -->
+            <g fill="#e5e5e5">
+              <path d="M 60 80 Q 160 40 280 70 Q 320 100 300 160 Q 250 200 180 190 Q 100 170 60 130 Z"/>
+              <path d="M 200 220 Q 280 210 330 250 Q 320 360 260 400 Q 220 380 210 300 Z"/>
+              <path d="M 420 90 Q 520 70 620 90 Q 700 110 720 160 Q 680 200 600 190 Q 520 180 460 160 Q 400 140 420 90 Z"/>
+              <path d="M 720 110 Q 880 90 950 130 Q 960 200 900 240 Q 820 260 760 230 Q 710 190 720 110 Z"/>
+              <path d="M 430 210 Q 540 200 560 260 Q 550 360 480 390 Q 420 360 430 280 Z"/>
+              <path d="M 780 310 Q 900 300 930 340 Q 920 410 850 420 Q 780 400 780 340 Z"/>
+            </g>
+            <g id="mapDots"></g>
+          </svg>
+        </div>
+
+        <div class="stats-grid">
+          <div class="stat-card">
+            <div class="stat-label">CPU</div>
+            <div class="donut" style="background:conic-gradient(var(--text) 25% 75%,var(--border) 0)">
+              <div class="donut-center">2.5k</div>
+            </div>
+            <div class="stat-value">2.55K CPU</div>
+            <div class="stat-detail">117 GPU / 10635 CPU</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">GPU</div>
+            <div class="donut" style="background:conic-gradient(var(--text) 50%,var(--border) 0)">
+              <div class="donut-center">117</div>
+            </div>
+            <div class="stat-value">117 GPU</div>
+            <div class="stat-detail">117 GPU / 230 GPU</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Memory</div>
+            <div class="donut" style="background:conic-gradient(var(--text) 14%,var(--border) 0)">
+              <div class="donut-center">10.9</div>
+            </div>
+            <div class="stat-value">10.89 TB</div>
+            <div class="stat-detail">10.89 TB / 73.13 TB</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Storage</div>
+            <div class="donut" style="background:conic-gradient(var(--text) 4%,var(--border) 0)">
+              <div class="donut-center">35</div>
+            </div>
+            <div class="stat-value">35.08 TB</div>
+            <div class="stat-detail">35.08 TB / 838.26 TB</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="actions-bar">
+          <div>
+            <div class="panel-title">Providers</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+            <input type="text" class="search-input" id="providerSearch" placeholder="Search providers" oninput="filterProviders(this.value)">
+            <select class="sort-select" id="sortSelect" onchange="sortProviders(this.value)">
+              <option value="leases">Active Leases (desc)</option>
+              <option value="name">Name</option>
+              <option value="uptime">Uptime</option>
+            </select>
+            <a href="deploy.html" class="btn btn-primary">Become a provider</a>
+          </div>
+        </div>
+        <div style="overflow-x:auto">
+          <table>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Location</th>
+                <th>Uptime</th>
+                <th>Active Leases</th>
+                <th>Disk</th>
+                <th>Audited</th>
+                <th>Favorite</th>
+              </tr>
+            </thead>
+            <tbody id="providerTable"></tbody>
+          </table>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+
+<div class="modal" id="attrModal" onclick="if(event.target===this) closeModal()">
+  <div class="modal-card">
+    <div class="modal-header">
+      <div class="modal-title">Audited Attributes</div>
+      <button class="modal-close" onclick="closeModal()">×</button>
+    </div>
+    <div class="modal-body" id="attrBody"></div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal()">Close</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  function toggleMobileNav(){
+    const sidebar=document.getElementById('sidebar');
+    const overlay=document.getElementById('mobileNavOverlay');
+    sidebar.classList.toggle('open');
+    overlay.classList.toggle('open');
+  }
+  function closeMobileNav(){
+    document.getElementById('sidebar').classList.remove('open');
+    document.getElementById('mobileNavOverlay').classList.remove('open');
+  }
+
+  const cities=[
+    {name:'New York',x:230,y:140},{name:'Los Angeles',x:160,y:155},{name:'Dallas',x:200,y:160},{name:'Miami',x:245,y:185},
+    {name:'Toronto',x:235,y:125},{name:'London',x:470,y:120},{name:'Amsterdam',x:480,y:115},{name:'Frankfurt',x:490,y:120},
+    {name:'Paris',x:475,y:125},{name:'Madrid',x:465,y:140},{name:'Warsaw',x:510,y:115},{name:'Stockholm',x:500,y:95},
+    {name:'Singapore',x:800,y:210},{name:'Tokyo',x:870,y:140},{name:'Sydney',x:880,y:320},{name:'Mumbai',x:720,y:190},
+    {name:'São Paulo',x:310,y:310},{name:'Johannesburg',x:530,y:330}
+  ];
+  function renderDots(){
+    const g=document.getElementById('mapDots');
+    g.innerHTML='';
+    cities.forEach(c=>{
+      const circle=document.createElementNS('http://www.w3.org/2000/svg','circle');
+      circle.setAttribute('cx',c.x);
+      circle.setAttribute('cy',c.y);
+      circle.setAttribute('r',5);
+      circle.setAttribute('class','map-dot');
+      circle.setAttribute('filter','url(#glow)');
+      circle.setAttribute('title',c.name);
+      g.appendChild(circle);
+    });
+  }
+  renderDots();
+
+  const providers=[
+    {name:'prov.aes-services.net',host:'AES Services',location:'US · DAL',uptime:'99.99%',leases:42,disk:'261 Mi / 4 Ti',audited:true,attrs:[{key:'host',val:'akash'},{key:'tier',val:'community'},{key:'organization',val:'AES Services'},{key:'location-region',val:'na-us-southwest'},{key:'country',val:'US'},{key:'city',val:'DAL'},{key:'capabilities/cpu',val:'intel'},{key:'capabilities/cpu/arch',val:'x86-64'},{key:'capabilities/memory',val:'ddr4ecc'},{key:'capabilities/storage/1/class',val:'beta2'},{key:'capabilities/storage/1/persistent',val:'true'},{key:'network-speed-up',val:'1000'},{key:'network-speed-down',val:'1000'},{key:'feat-persistent-storage',val:'true'}]},
+    {name:'prov.all frontier.io',host:'AllFrontier',location:'US · SFO',uptime:'99.95%',leases:38,disk:'701 Mi / 8 Ti',audited:true,attrs:[{key:'host',val:'akash'},{key:'tier',val:'community'},{key:'location-region',val:'na-us-west'},{key:'country',val:'US'},{key:'city',val:'SFO'},{key:'capabilities/cpu/arch',val:'x86-64'},{key:'network-speed-up',val:'1000'},{key:'network-speed-down',val:'1000'}]},
+    {name:'prov.ewtech.com.au',host:'EwTech',location:'AU · SYD',uptime:'99.91%',leases:31,disk:'916 Mi / 13 Ti',audited:true,attrs:[{key:'host',val:'akash'},{key:'country',val:'AU'},{key:'city',val:'SYD'},{key:'capabilities/cpu/arch',val:'x86-64'}]},
+    {name:'prov.aes-akash.pub',host:'AkashPub',location:'US · DAL',uptime:'99.98%',leases:29,disk:'2 Mi / 8 Ti',audited:true,attrs:[{key:'host',val:'akash'},{key:'country',val:'US'},{key:'city',val:'DAL'}]},
+    {name:'prov.ainrapids.com',host:'AInRapids',location:'US · NYC',uptime:'99.88%',leases:25,disk:'1 Mi / 12 Ti',audited:true,attrs:[{key:'host',val:'akash'},{key:'country',val:'US'},{key:'city',val:'NYC'}]},
+    {name:'prov.b-palm.be',host:'BPalm',location:'BE · BRU',uptime:'99.92%',leases:22,disk:'60 Mi / 2 Ti',audited:true,attrs:[{key:'host',val:'akash'},{key:'country',val:'BE'},{key:'city',val:'BRU'}]},
+    {name:'provider.golden.fy',host:'GoldenFY',location:'SG · SIN',uptime:'99.85%',leases:19,disk:'251 Mi / 6 Ti',audited:false,attrs:[{key:'host',val:'akash'},{key:'country',val:'SG'},{key:'city',val:'SIN'}]},
+    {name:'prov.akash.pal',host:'AkashPal',location:'IN · MUM',uptime:'99.79%',leases:15,disk:'73 Mi / 18 Ti',audited:true,attrs:[{key:'host',val:'akash'},{key:'country',val:'IN'},{key:'city',val:'MUM'}]},
+    {name:'prov.cloudmax.net',host:'CloudMax',location:'DE · FRA',uptime:'99.96%',leases:12,disk:'35 Mi / 31 Ti',audited:true,attrs:[{key:'host',val:'akash'},{key:'country',val:'DE'},{key:'city',val:'FRA'}]},
+    {name:'prov.northnode.io',host:'NorthNode',location:'CA · TOR',uptime:'99.90%',leases:10,disk:'492 Mi / 16 Ti',audited:true,attrs:[{key:'host',val:'akash'},{key:'country',val:'CA'},{key:'city',val:'TOR'}]}
+  ];
+  let currentProviders=[...providers];
+
+  function renderTable(list){
+    const tbody=document.getElementById('providerTable');
+    tbody.innerHTML='';
+    list.forEach((p,i)=>{
+      const tr=document.createElement('tr');
+      tr.innerHTML=`
+        <td><div class="provider-name">${p.name}</div><div class="provider-host">${p.host}</div></td>
+        <td>${p.location}</td>
+        <td>${p.uptime}</td>
+        <td>${p.leases}</td>
+        <td>${p.disk}</td>
+        <td><span class="badge ${p.audited?'badge-audited':'badge-pending'}">${p.audited?'Yes':'No'}</span></td>
+        <td><span class="star" onclick="toggleStar(this)">★</span></td>
+      `;
+      tr.querySelector('.provider-name').style.cursor='pointer';
+      tr.querySelector('.provider-name').onclick=()=>openAttrs(p);
+      tbody.appendChild(tr);
+    });
+  }
+  function filterProviders(query){
+    const q=query.toLowerCase();
+    currentProviders=providers.filter(p=>p.name.toLowerCase().includes(q)||p.location.toLowerCase().includes(q)||p.host.toLowerCase().includes(q));
+    sortProviders(document.getElementById('sortSelect').value);
+  }
+  function sortProviders(by){
+    const list=[...currentProviders];
+    if(by==='name') list.sort((a,b)=>a.name.localeCompare(b.name));
+    else if(by==='uptime') list.sort((a,b)=>parseFloat(b.uptime)-parseFloat(a.uptime));
+    else list.sort((a,b)=>b.leases-a.leases);
+    renderTable(list);
+  }
+  function toggleStar(el){el.classList.toggle('active');}
+  function openAttrs(p){
+    const body=document.getElementById('attrBody');
+    body.innerHTML=p.attrs.map(a=>`
+      <div class="attr-row">
+        <div class="attr-key">${a.key}</div>
+        <div class="attr-val">${a.val}</div>
+        <div class="attr-auditor">Akash Network</div>
+      </div>
+    `).join('');
+    document.getElementById('attrModal').classList.add('open');
+  }
+  function closeModal(){document.getElementById('attrModal').classList.remove('open');}
+
+  sortProviders('leases');
+</script>
+
+</body>
+</html>

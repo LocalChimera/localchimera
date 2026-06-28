@@ -4,7 +4,7 @@ import { Logger } from '../core/Logger.js';
 import pkg from 'casper-js-sdk';
 
 const sdk = pkg;
-const { PrivateKey, PublicKey, KeyAlgorithm, CLValue, Args, ContractHash, StoredContractByHash, ExecutableDeployItem, DeployHeader, Deploy } = sdk;
+const { PrivateKey, PublicKey, KeyAlgorithm, CLValue, Args, ContractHash, StoredContractByHash, ExecutableDeployItem, DeployHeader, Deploy, Transaction, TransactionWrapper } = sdk;
 
 const RPC_URL = process.env.CASPER_RPC_URL || 'https://node.testnet.casper.network/rpc';
 const CHAIN_NAME = process.env.CASPER_CHAIN_NAME || 'casper-test';
@@ -75,11 +75,15 @@ function loadPrivateKey(pemOrPath) {
 async function submitDeploy(privateKey, contractHash, entryPoint, argsMap, payment) {
   const publicKey = privateKey.publicKey;
   const deploy = buildDeploy(publicKey, contractHash, entryPoint, argsMap, payment);
-  deploy.sign(privateKey);
-  const deployJSON = Deploy.toJSON(deploy);
-  const res = await rpcCall('account_put_deploy', { deploy: deployJSON });
-  if (res.error) throw new Error(`Deploy failed: ${res.error.message}`);
-  return res.result?.deploy_hash;
+  // Casper 2.0 uses transactions instead of deploys
+  const transaction = Transaction.fromDeploy(deploy);
+  transaction.sign(privateKey);
+  const txJSON = transaction.toJSON();
+  const wrapper = transaction.getTransactionWrapper();
+  const wrapperJSON = TransactionWrapper.toJSON(wrapper);
+  const res = await rpcCall('account_put_transaction', { transaction: wrapperJSON });
+  if (res.error) throw new Error(`Transaction failed: ${res.error.message}`);
+  return res.result?.transaction_hash || res.result?.deploy_hash;
 }
 
 function csprToMotes(cspr) {

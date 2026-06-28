@@ -10,6 +10,7 @@ Static marketing site for Chimera. Deployed to Cloudflare Pages at https://local
 - **console.html** — Akash Console-style dashboard home (sidebar, welcome cards, account stats, empty state)
 - **deploy.html** — Create deployment page with SDL builder/YAML editor and Docker Hub image search
 - **templates.html** — Marketplace of pre-built AI/ML and container templates
+- **providers.html** — Network capacity map, provider stats, and audited provider list
 - **chimeralogo.png** — Logo with background (for favicon)
 - **chimeralogo-header.png** — Logo without background (for header)
 - **banner2.png** — Hero banner image

@@ -3,7 +3,7 @@ import { Logger } from '../core/Logger.js';
 import pkg from 'casper-js-sdk';
 
 const sdk = pkg;
-const { PrivateKey, PublicKey, KeyAlgorithm, CLValue, Args, ContractHash, StoredContractByHash, ExecutableDeployItem, DeployHeader, Deploy, RpcClient, HttpHandler } = sdk;
+const { PrivateKey, PublicKey, KeyAlgorithm, CLValue, Args, ContractHash, StoredContractByHash, ExecutableDeployItem, DeployHeader, Deploy, Transaction, TransactionWrapper, RpcClient, HttpHandler } = sdk;
 
 const DEFAULT_RPC_URL = 'https://node.testnet.casper.network/rpc';
 
@@ -916,18 +916,21 @@ export class CasperEscrowBridge {
 
     const publicKey = this.providerKey.publicKey;
     const deploy = this.buildDeploy(publicKey, contractHash, entryPoint, argsMap, payment);
-    deploy.sign(this.providerKey);
+    // Casper 2.0 uses transactions instead of deploys
+    const transaction = Transaction.fromDeploy(deploy);
+    transaction.sign(this.providerKey);
 
-    // Use raw RPC to submit deploy
-    const deployJSON = Deploy.toJSON(deploy);
-    const res = await rpcCall(this.rpcUrl, 'account_put_deploy', { deploy: deployJSON });
+    const wrapper = transaction.getTransactionWrapper();
+    const wrapperJSON = TransactionWrapper.toJSON(wrapper);
+    const res = await rpcCall(this.rpcUrl, 'account_put_transaction', { transaction: wrapperJSON });
 
     if (res.error) {
-      throw new Error(`Deploy failed: ${res.error.message}`);
+      throw new Error(`Transaction failed: ${res.error.message}`);
     }
 
-    this.logger.info(`Deploy ${entryPoint} submitted: ${res.result?.deploy_hash || 'unknown'}`);
-    return res.result?.deploy_hash;
+    const txHash = res.result?.transaction_hash || res.result?.deploy_hash;
+    this.logger.info(`Transaction ${entryPoint} submitted: ${txHash || 'unknown'}`);
+    return txHash;
   }
 
   async sendViaRelay(contractHash, entryPoint, argsMap, payment = '5000000000') {

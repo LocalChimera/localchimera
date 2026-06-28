@@ -2,10 +2,6 @@ name: Test APK on LambdaTest
 
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-  release:
-    types: [published]
 
 jobs:
   lambdatest-test:

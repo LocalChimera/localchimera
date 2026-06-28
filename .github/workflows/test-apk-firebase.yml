@@ -2,6 +2,8 @@ name: Test APK on Firebase Test Lab
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
   release:
     types: [published]
 
@@ -9,9 +11,29 @@ jobs:
   firebase-test:
     runs-on: ubuntu-latest
     steps:
-      - name: Download latest APK
+      - uses: actions/checkout@v4
+
+      - name: Download latest release APK
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          curl -sL -o chimera.apk "https://github.com/LocalChimera/localchimera/releases/latest/download/app-arm64-v8a-release.apk"
+          AUTH="Authorization: token $GH_TOKEN"
+          APK_URL=$(curl -s -H "$AUTH" -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/LocalChimera/localchimera/releases?per_page=20" \
+            | python3 -c "
+          import sys, json
+          data = json.load(sys.stdin)
+          withAssets = [r for r in data if r.get('assets')]
+          withAssets.sort(key=lambda r: r['created_at'], reverse=True)
+          for rel in withAssets:
+            for a in rel['assets']:
+              if 'arm64' in a['name'].lower() and a['name'].endswith('.apk') and 'debug' not in a['name'].lower():
+                print(a['browser_download_url'])
+                sys.exit(0)
+          ")
+          echo "Downloading APK from: $APK_URL"
+          curl -s -L -H "$AUTH" -o chimera.apk "$APK_URL"
+          echo "Downloaded APK:"
           ls -lh chimera.apk
 
       - id: auth
@@ -29,9 +51,7 @@ jobs:
             --app chimera.apk \
             --device model=oriole,version=33,locale=en,orientation=portrait \
             --timeout 5m \
-            --results-bucket=chimera-test-results \
             --results-dir=run_${{ github.run_id }} \
-            --robo-directives text:ai-prompt-input="hello world" \
             2>&1 | tee testlab-output.txt
 
       - name: Upload Test Lab results
@@ -40,3 +60,4 @@ jobs:
         with:
           name: firebase-testlab-results
           path: testlab-output.txt
+          if-no-files-found: ignore
