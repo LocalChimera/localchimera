@@ -343,7 +343,7 @@ export class CasperEscrowBridge {
       this.logger.info(`Job ${jobId} request: ${requestHash}`);
 
       // Process job based on type prefix
-      const responseText = await this.processJob(requestHash || jobId);
+      const responseText = await this.processJob(requestHash || jobId, taskTypeVal);
       this.logger.info(`Job ${jobId} response: ${responseText.slice(0, 100)}...`);
 
       // Complete job with actual result

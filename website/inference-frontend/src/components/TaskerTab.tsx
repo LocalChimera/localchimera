@@ -267,7 +267,7 @@ export default function TaskerTab({ provider, publicKeyHex, accountHash, onTx }:
               {jobs.length > 0 && jobs.filter(j => j.state < 3 && !j.requestHash?.startsWith('STORAGE:') && !j.requestHash?.startsWith('COMPUTE:') && !j.requestHash?.startsWith('BANDWIDTH:')).length > 0 && (
                 <div className="space-y-1 mt-3 border-t border-white/10 pt-3">
                   <div className="text-xs font-semibold text-[#7a7468]">Pending Jobs</div>
-                  {jobs.filter(j => j.state < 3 && !j.requestHash?.startsWith('STORAGE:') && !j.requestHash?.startsWith('COMPUTE:') && !j.requestHash?.startsWith('BANDWIDTH:')).map((job) => (
+                  {jobs.filter(j => j.state < 3 && !j.requestHash?.startsWith('STORAGE:') && !j.requestHash?.startsWith('COMPUTE:') && !j.requestHash?.startsWith('BANDWIDTH:')).slice(0, 5).map((job) => (
                     <div key={job.id} className="flex items-center justify-between text-xs bg-white/[0.02] rounded p-2 overflow-hidden">
                       <span className="font-mono text-[10px] text-[#7a7468] truncate flex-1 mr-2">{job.id}</span>
                       <span className="text-[#00e5ff] shrink-0">{job.status}</span>
@@ -336,7 +336,7 @@ export default function TaskerTab({ provider, publicKeyHex, accountHash, onTx }:
               {jobs.length > 0 && jobs.filter(j => j.state < 3 && j.requestHash?.startsWith('STORAGE:ALLOC:')).length > 0 && (
                 <div className="space-y-1 mt-3 border-t border-white/10 pt-3">
                   <div className="text-xs font-semibold text-[#7a7468]">Pending Reservations</div>
-                  {jobs.filter(j => j.state < 3 && j.requestHash?.startsWith('STORAGE:ALLOC:')).map((job) => (
+                  {jobs.filter(j => j.state < 3 && j.requestHash?.startsWith('STORAGE:ALLOC:')).slice(0, 5).map((job) => (
                     <div key={job.id} className="flex items-center justify-between text-xs bg-white/[0.02] rounded p-2 overflow-hidden">
                       <span className="font-mono text-[10px] text-[#7a7468] truncate flex-1 mr-2">{job.requestHash || job.id}</span>
                       <span className="text-[#00e5ff] shrink-0">{job.status}</span>
@@ -450,7 +450,7 @@ export default function TaskerTab({ provider, publicKeyHex, accountHash, onTx }:
               {jobs.length > 0 && jobs.filter(j => j.state < 3 && j.requestHash?.startsWith('STORAGE:FILE:')).length > 0 && (
                 <div className="space-y-1 mt-3 border-t border-white/10 pt-3">
                   <div className="text-xs font-semibold text-[#7a7468]">Pending File Uploads</div>
-                  {jobs.filter(j => j.state < 3 && j.requestHash?.startsWith('STORAGE:FILE:')).map((job) => (
+                  {jobs.filter(j => j.state < 3 && j.requestHash?.startsWith('STORAGE:FILE:')).slice(0, 5).map((job) => (
                     <div key={job.id} className="flex items-center justify-between text-xs bg-white/[0.02] rounded p-2 overflow-hidden">
                       <span className="font-mono text-[10px] text-[#7a7468] truncate flex-1 mr-2">{job.requestHash || job.id}</span>
                       <span className="text-[#00e5ff] shrink-0">{job.status}</span>
@@ -527,7 +527,7 @@ export default function TaskerTab({ provider, publicKeyHex, accountHash, onTx }:
               {jobs.length > 0 && jobs.filter(j => j.state < 3 && j.requestHash?.startsWith('COMPUTE:')).length > 0 && (
                 <div className="space-y-1 mt-3 border-t border-white/10 pt-3">
                   <div className="text-xs font-semibold text-[#7a7468]">Pending Compute Jobs</div>
-                  {jobs.filter(j => j.state < 3 && j.requestHash?.startsWith('COMPUTE:')).map((job) => (
+                  {jobs.filter(j => j.state < 3 && j.requestHash?.startsWith('COMPUTE:')).slice(0, 5).map((job) => (
                     <div key={job.id} className="flex items-center justify-between text-xs bg-white/[0.02] rounded p-2 overflow-hidden">
                       <span className="font-mono text-[10px] text-[#7a7468] truncate flex-1 mr-2">{job.id}</span>
                       <span className="text-[#00e5ff] shrink-0">{job.status}</span>
@@ -596,7 +596,7 @@ export default function TaskerTab({ provider, publicKeyHex, accountHash, onTx }:
               {jobs.length > 0 && jobs.filter(j => j.state < 3 && j.requestHash?.startsWith('BANDWIDTH:')).length > 0 && (
                 <div className="space-y-1 mt-3 border-t border-white/10 pt-3">
                   <div className="text-xs font-semibold text-[#7a7468]">Pending Bandwidth Jobs</div>
-                  {jobs.filter(j => j.state < 3 && j.requestHash?.startsWith('BANDWIDTH:')).map((job) => (
+                  {jobs.filter(j => j.state < 3 && j.requestHash?.startsWith('BANDWIDTH:')).slice(0, 5).map((job) => (
                     <div key={job.id} className="flex items-center justify-between text-xs bg-white/[0.02] rounded p-2 overflow-hidden">
                       <span className="font-mono text-[10px] text-[#7a7468] truncate flex-1 mr-2">{job.id}</span>
                       <span className="text-[#00e5ff] shrink-0">{job.status}</span>
