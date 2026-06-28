@@ -2604,7 +2604,8 @@ Copy the topic hex and invite others to join.
 
   async handleMarketJobStatus(req, res) {
     try {
-      const params = extractRouteParams(req.url.pathname);
+      const pathname = req.url.split('?')[0];
+      const params = extractRouteParams(pathname);
       const jobId = params.jobId;
       if (!jobId) return badRequest(res, 'Missing jobId');
       const status = await marketApi.getJobStatus(jobId);
@@ -2614,7 +2615,8 @@ Copy the topic hex and invite others to join.
 
   async handleMarketJobResult(req, res) {
     try {
-      const params = extractRouteParams(req.url.pathname);
+      const pathname = req.url.split('?')[0];
+      const params = extractRouteParams(pathname);
       const jobId = params.jobId;
       if (!jobId) return badRequest(res, 'Missing jobId');
       const result = await marketApi.getJobResult(jobId);
