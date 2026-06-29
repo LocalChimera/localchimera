@@ -3,7 +3,7 @@ import { StyleSheet, View, Text, ActivityIndicator } from 'react-native';
 import { WebView } from 'react-native-webview';
 import * as FileSystem from 'expo-file-system';
 
-const FRONTEND_URL = 'file:///android_asset/frontend/index.html';
+const FRONTEND_URL = 'file:///android_asset/index.html';
 const LLAMA_MODEL = 'LLAMA_3_2_1B_INST_Q4_0';
 const WIKI_DIR = FileSystem.documentDirectory + 'llmwiki/';
 

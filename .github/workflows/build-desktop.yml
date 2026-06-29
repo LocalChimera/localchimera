@@ -364,12 +364,12 @@ jobs:
           echo "=== Bundle in assets ==="
           ls -lh ../app/src/main/assets/index.android.bundle 2>&1 || echo "Bundle not found!"
           echo "=== Assets before frontend copy ==="
-          ls -lh ../app/src/main/assets/ | head -20
+          find ../app/src/main/assets -maxdepth 2 -type f | head -40
       - name: Re-copy frontend to Android native assets after bundle
         run: |
           node apps/mobile-expo/scripts/copy-frontend.js
           echo "=== Assets after frontend copy ==="
-          ls -lh apps/mobile-expo/android/app/src/main/assets/ | head -20
+          find apps/mobile-expo/android/app/src/main/assets -maxdepth 2 -type f | head -40
       - name: Build Expo AAB (Play Store) and APKs
         run: |
           cd apps/mobile-expo/android

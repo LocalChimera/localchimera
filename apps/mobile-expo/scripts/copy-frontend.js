@@ -3,7 +3,7 @@ const path = require('path');
 
 const srcDir = path.join(__dirname, '../../../qvac/frontend/dist');
 const destDir = path.join(__dirname, '../assets/frontend');
-const androidAssetsDir = path.join(__dirname, '../android/app/src/main/assets/frontend');
+const androidAssetsDir = path.join(__dirname, '../android/app/src/main/assets');
 
 function copyRecursive(src, dest) {
   if (!fs.existsSync(dest)) {
