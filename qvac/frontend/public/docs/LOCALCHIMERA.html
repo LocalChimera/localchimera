@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Localchimera Documentation</title>
+  <style>
+    :root { color-scheme: dark; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      line-height: 1.6;
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 2rem 1rem;
+      background: #030308;
+      color: #e8e2d8;
+    }
+    h1, h2, h3 { color: #fff; margin-top: 2rem; }
+    h1 { border-bottom: 2px solid #a855f7; padding-bottom: 0.5rem; }
+    h2 { border-bottom: 1px solid #333; padding-bottom: 0.3rem; }
+    a { color: #00e5ff; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    code {
+      background: #1a1a2e;
+      padding: 0.2em 0.4em;
+      border-radius: 4px;
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    }
+    pre {
+      background: #1a1a2e;
+      padding: 1rem;
+      border-radius: 8px;
+      overflow-x: auto;
+    }
+    pre code { background: transparent; padding: 0; }
+    table {
+      border-collapse: collapse;
+      width: 100%;
+      margin: 1rem 0;
+    }
+    th, td {
+      border: 1px solid #333;
+      padding: 0.6rem;
+      text-align: left;
+    }
+    th { background: #1a1a2e; color: #fff; }
+    blockquote {
+      border-left: 4px solid #a855f7;
+      margin: 1rem 0;
+      padding-left: 1rem;
+      color: #b0a89e;
+    }
+    hr { border: 0; border-top: 1px solid #333; margin: 2rem 0; }
+    .toc { background: #1a1a2e; padding: 1rem; border-radius: 8px; margin-bottom: 2rem; }
+    .toc ul { list-style-type: none; padding-left: 0; }
+    .toc li { margin: 0.3rem 0; }
+  </style>
+</head>
+<body>
+  <a href="/">← Back to app</a>
+  <main>
+<h1 id="localchimera">Localchimera</h1>
+<blockquote>
+<p>A local AI node that earns when idle. Your device is its own autonomous node — no centralized router, no relay server required.</p>
+</blockquote>
+<p>This document is the end-to-end guide to the Localchimera codebase. It explains what the project is, how it is organized, how to run it, and how the pieces fit together.</p>
+<hr />
+<h2 id="1-what-localchimera-is">1. What Localchimera Is</h2>
+<p>Localchimera is a standalone QVAC inference node that runs inside a hardened Docker container. Every device (desktop, mobile, or server) can be its own autonomous node:</p>
+<ul>
+<li><strong>LLM Wiki</strong> opens directly in the browser with auto-save every 2 seconds.</li>
+<li><strong>QVAC inference</strong> runs locally on the device for private, offline-capable AI generation.</li>
+<li><strong>Mining/Tasking</strong> uses the device's idle capacity to complete tasks on untrusted-hardware-safe networks.</li>
+<li><strong>P2P sync</strong> replicates wiki pages and receipts across devices over Pear P2P swarms.</li>
+</ul>
+<p>The app is bundled as a Tauri desktop app, Capacitor/Expo mobile apps, and a web marketing site.</p>
+<hr />
+<h2 id="2-core-design-principles">2. Core Design Principles</h2>
+<h3 id="21-untrusted-hardware-safety">2.1 Untrusted-Hardware Safety</h3>
+<p>The whole architecture is built so the device running Localchimera does <strong>not</strong> need to hold private keys, wallet mnemonics, or provider credentials. Networks are only included if they support one of these patterns:</p>
+<ul>
+<li><strong>Relay/worker split</strong>: a trusted relay holds the key material; the worker just reports an endpoint or receives signed tasks.</li>
+<li><strong>No keys required</strong>: the provider only needs a payout address or public reference.</li>
+<li><strong>Docker-based</strong>: the node identity lives inside a container, not in the SDK.</li>
+<li><strong>Walletless storage</strong>: storage jobs are assigned through an on-chain escrow contract, so the device stores no wallet.</li>
+</ul>
+<p>Networks that require local keys or self-managed credentials have been removed. The archived analysis is in <code>docs/RELAY_COMPATIBILITY.md</code>.</p>
+<h3 id="22-upstream-first">2.2 Upstream-First</h3>
+<p>Localchimera vendors upstream projects as git submodules under <code>upstream/</code> and uses them as directly as possible. This minimizes custom code and keeps forks up to date. See <code>docs/UPSTREAM.md</code> for the full catalog and update instructions.</p>
+<p>Key upstream projects include:</p>
+<ul>
+<li><strong>LLMwiki</strong>, <strong>OpenViking</strong>, <strong>OtterWiki</strong> for the wiki / memory layer</li>
+<li><strong>repo-to-markdown</strong>, <strong>markitdown</strong> for file conversion</li>
+<li><strong>BTT AI</strong>, <strong>Golem</strong>, <strong>Anyone Protocol</strong>, <strong>Mysterium</strong>, <strong>BTFS</strong> for tasking networks</li>
+<li><strong>Zama Concrete</strong> and <strong>fhEVM</strong> for future encrypted on-chain inference</li>
+</ul>
+<hr />
+<h2 id="3-project-structure">3. Project Structure</h2>
+<p><code>localchimera/
+├── website/                  # Marketing site + demo wiki + earnings
+├── website-new/              # Next-generation marketing site
+├── apps/                     # Desktop/mobile apps
+│   ├── desktop/              # Tauri desktop app (Linux, macOS, Windows)
+│   ├── macos/                # Native macOS app bundle
+│   ├── mobile/               # Capacitor mobile app
+│   ├── mobile-expo/          # Expo mobile app with Bare worker
+│   └── install/              # Installers and build scripts
+├── qvac/                     # Backend node + LLM Wiki frontend
+│   ├── src/                  # Node.js backend
+│   │   ├── core/             # NodeManager, WalletManager, AuditLogger, ContentAddress, DeploymentLifecycle
+│   │   ├── inference/        # QVACInferenceLayer, ProofOfInference, PromptGuard, TokenMeter, VoicePipeline, AgentLoop
+│   │   ├── llmwiki/          # Bridges for OtterWiki, OpenViking, LLMwiki
+│   │   ├── miners/           # Chutes, Routstr, Earnidle, BTT AI, Golem, Anyone, Mysterium, BTFS, Casper
+│   │   ├── p2p/              # Pear P2P networking, CapabilityManifest, ContentPinner
+│   │   ├── web/              # HTTP server + API routes
+│   │   └── scheduler/        # TaskMonitor
+│   ├── frontend/             # React app (LLM Wiki)
+│   ├── app/                  # Legacy Python app layer
+│   ├── backend/              # Language-specific backend subprojects (Rust, Earnidle runtime, smart contracts)
+│   ├── config/               # QVAC configuration files
+│   └── examples/             # AI Writer integration examples
+├── sdk/                      # @chimera/sdk — build your own app
+│   ├── src/                  # Provider implementations
+│   └── examples/             # Integration examples
+├── inference-backend/        # Encrypted inference backend (FHE/SEAL experiments)
+├── inference-config/           # Network deployment configs
+├── contracts/                # EVM smart contracts (ProofOfInferenceVerifier, FHEInferenceMarket)
+├── contracts-casper/         # Casper Network smart contracts (escrow vault, provider registry)
+├── providers/                # Provider setup/lifecycle scripts
+├── scripts/                  # Automation, deployment, and utility scripts
+│   ├── deploy/               # Contract and infrastructure deployment
+│   ├── register/             # Node registration
+│   ├── testing/              # BrowserStack / LambdaTest / TestingBot smoke tests
+│   ├── debug/                # One-off debugging scripts
+│   └── utils/                # Key cleanup, balance checks, wallet generation, WASM patching
+├── docs/                     # Documentation (UPSTREAM.md, RELAY_COMPATIBILITY.md, etc.)
+├── cashu/                    # Cashu ecash integration
+├── routstr/                  # Nostr/Cashu inference routing
+├── brand-assets/             # Logos and brand assets
+├── releases/                 # Release notes and installers
+├── upstream/                 # Git submodules for upstream forks and dependencies
+└── lib/                      # Foundry libraries (fhevm, forge-std)</code></p>
+<p>Each directory has a <code>README.md</code> explaining its contents.</p>
+<hr />
+<h2 id="4-quick-start">4. Quick Start</h2>
+<h3 id="41-docker-recommended">4.1 Docker (Recommended)</h3>
+<p>```bash
+cd qvac
+docker-compose up -d</p>
+<h1 id="open-httplocalhost3002">Open http://localhost:3002</h1>
+<p>```</p>
+<h3 id="42-desktop-linux">4.2 Desktop (Linux)</h3>
+<p>```bash
+cd apps/desktop
+npm install
+npm run tauri:build</p>
+<h1 id="install-from-src-tauritargetreleasebundle">Install from src-tauri/target/release/bundle/</h1>
+<p>```</p>
+<h3 id="43-mobile">4.3 Mobile</h3>
+<p><code>bash
+cd qvac/frontend
+npm install &amp;&amp; npm run build
+npx cap sync
+npx cap open ios     # or android</code></p>
+<hr />
+<h2 id="5-mining-and-tasking-networks">5. Mining and Tasking Networks</h2>
+<p>Localchimera supports the following networks, all chosen because they are safe to run on untrusted hardware:</p>
+<p>| Network | Role | Integration | Key Safety |
+|---|---|---|---|
+| <strong>Chutes</strong> | AI inference | Protocol integration in <code>qvac/src/miners/ChutesMiner.js</code> | Relay holds hotkey |
+| <strong>Routstr</strong> | AI inference routing | Nostr/Cashu | No local keys |
+| <strong>BTT AI</strong> | AI inference | Docker / GPU miner via <code>sdk/src/miners/BttAiMinerProvider.js</code> | Proxy mode |
+| <strong>Golem</strong> | Compute | Docker provider via <code>sdk/src/miners/GolemProvider.js</code> | Payout address only |
+| <strong>Anyone Protocol</strong> | Bandwidth | Docker relay via <code>sdk/src/miners/AnyoneProtocolProvider.js</code> | No keys required |
+| <strong>Mysterium</strong> | Bandwidth (VPN) | Docker VPN node via <code>sdk/src/miners/MysteriumProvider.js</code> | No keys required |
+| <strong>BTFS</strong> | Storage | Walletless storage via <code>sdk/src/miners/BtfsStorageProvider.js</code> | No BTT wallet on device |
+| <strong>Casper</strong> | Settlement / relay | Relay-mode bridge | Provider key on relay only |
+| <strong>Earnidle</strong> | Idle compute | Public Solana address only | No private key |</p>
+<h3 id="51-how-providers-are-tracked">5.1 How Providers Are Tracked</h3>
+<p>Each provider is vendored as a git submodule under <code>upstream/</code>:</p>
+<ul>
+<li><code>upstream/btt-ai-miner</code></li>
+<li><code>upstream/golem</code></li>
+<li><code>upstream/anyone-protocol</code></li>
+<li><code>upstream/mysterium</code></li>
+<li><code>upstream/btfs</code></li>
+</ul>
+<p>To keep forks up to date:</p>
+<p><code>bash
+./scripts/fork-upstream.sh &lt;your-github-username&gt;
+./scripts/update-tasking-forks.sh</code></p>
+<h3 id="52-starting-providers">5.2 Starting Providers</h3>
+<p>Use the provider scripts:</p>
+<p><code>bash
+./providers/start-all.sh
+./providers/status.sh</code></p>
+<p>Individual setup is in <code>providers/setup-*.sh</code>.</p>
+<hr />
+<h2 id="6-the-sdk">6. The SDK</h2>
+<p><code>@chimera/sdk</code> lets third-party apps add Localchimera mining with a single consent prompt and start/stop buttons. The app never handles wallets, earnings, or revenue splits.</p>
+<p>```jsx
+import { useChimera } from '@chimera/sdk';</p>
+<p>function MiningPanel() {
+  const { status, consentGiven, giveConsent, start, stop } = useChimera({
+    appDeveloperEVM: '0xYourEvmWalletAddressHere'
+  });
+  // ... consent + start/stop UI
+}
+```</p>
+<p>See <code>sdk/README.md</code> for the full API and security model.</p>
+<hr />
+<h2 id="7-wiki-and-knowledge-layer">7. Wiki and Knowledge Layer</h2>
+<p>The LLM Wiki is the default landing experience. It auto-saves every 2 seconds and stores pages in three ways:</p>
+<ol>
+<li><strong>Local file storage</strong> in <code>qvac/llmwiki-data/wiki/</code> for the local indexer and Hypercore.</li>
+<li><strong>OtterWiki</strong> via <code>qvac/src/llmwiki/otterwiki_bridge.py</code> for git-backed wiki storage.</li>
+<li><strong>OpenViking</strong> via <code>qvac/src/llmwiki/openviking_bridge.py</code> for session-based memory.</li>
+</ol>
+<p>The server (<code>qvac/src/web/server.js</code>) exposes HTTP routes for search, save, delete, and status, merging results from the local indexer and the upstream bridges.</p>
+<hr />
+<h2 id="8-encrypted-inference-fhe">8. Encrypted Inference (FHE)</h2>
+<p>The <code>inference-backend/</code> directory contains experiments in encrypted, decentralized inference:</p>
+<ul>
+<li><strong>Microsoft SEAL</strong> via <code>node-seal</code> for portable WebAssembly FHE in browser and Node.js.</li>
+<li><strong>Zama fhEVM</strong> and <strong>Concrete</strong> submodules are tracked for future migration to on-chain encrypted inference jobs.</li>
+<li><strong>Contracts</strong>: <code>contracts/FHEInferenceMarket.sol</code> and <code>contracts/ProofOfInferenceVerifier.sol</code> handle on-chain market and receipt verification.</li>
+<li><strong>Configs</strong>: <code>inference-config/</code> holds network-specific deployment configs.</li>
+</ul>
+<p>This area is under active development. See <code>inference-README.md</code> for the high-level architecture.</p>
+<hr />
+<h2 id="9-payments-and-settlement">9. Payments and Settlement</h2>
+<p>Mining rewards flow through Chimera protocol multisigs:</p>
+<ol>
+<li><strong>Mining</strong> — device completes tasks on safe networks.</li>
+<li><strong>Weekly sweep</strong> — all funds are swept into the Chimera EVM collection multisig.</li>
+<li><strong>Monthly distribution</strong> — funds are split between the machine owner and the app developer.</li>
+</ol>
+<p>Apps only pass an EVM address. The Chimera landing page handles wallet setup, earnings tracking, and revenue distribution.</p>
+<hr />
+<h2 id="10-development-and-scripts">10. Development and Scripts</h2>
+<h3 id="101-keeping-up-to-date">10.1 Keeping Up to Date</h3>
+<p>```bash</p>
+<h1 id="check-npm-dependencies">Check npm dependencies</h1>
+<p>./scripts/update-upstream.sh check</p>
+<h1 id="update-forked-tasking-submodules">Update forked tasking submodules</h1>
+<p>./scripts/update-tasking-forks.sh</p>
+<h1 id="update-all-upstream-submodules">Update all upstream submodules</h1>
+<p>./scripts/update-upstream.sh update
+```</p>
+<h3 id="102-deployment">10.2 Deployment</h3>
+<p>```bash</p>
+<h1 id="deploy-contracts">Deploy contracts</h1>
+<p>forge script scripts/deploy/DeployChimera.s.sol:DeployChimera --rpc-url $RPC_URL --broadcast</p>
+<h1 id="deploy-inference-infrastructure">Deploy inference infrastructure</h1>
+<p>./scripts/deploy/deploy-inference.sh
+```</p>
+<h3 id="103-testing">10.3 Testing</h3>
+<p>```bash
+cd qvac
+npm test</p>
+<h1 id="or">or</h1>
+<p>npx vitest
+```</p>
+<hr />
+<h2 id="11-security-summary">11. Security Summary</h2>
+<ul>
+<li>The SDK never stores or exposes private keys.</li>
+<li>Apps cannot extract funds because they only receive references to OS-level secure storage, not key material.</li>
+<li>Docker containers run as a non-root user with minimal dependencies.</li>
+<li>Removed networks (Cortensor, Fortytwo, CESS, Akash, Targon, ZCN, Income Generator, CashPilot, Salad, Heurist, Lium, Nosana, ByteLeap) are archived in <code>docs/RELAY_COMPATIBILITY.md</code>.</li>
+</ul>
+<hr />
+<h2 id="12-where-to-go-next">12. Where to Go Next</h2>
+<ul>
+<li><code>README.md</code> — root overview and feature list</li>
+<li><code>sdk/README.md</code> — how to integrate <code>@chimera/sdk</code> into your app</li>
+<li><code>docs/UPSTREAM.md</code> — full upstream catalog and update instructions</li>
+<li><code>docs/RELAY_COMPATIBILITY.md</code> — archived provider compatibility analysis</li>
+<li><code>inference-README.md</code> — encrypted inference design</li>
+<li><code>providers/README.md</code> — provider setup scripts</li>
+<li><code>qvac/src/README.md</code> — backend source layout</li>
+<li><code>apps/README.md</code> — desktop/mobile apps</li>
+</ul>  </main>
+</body>
+</html>

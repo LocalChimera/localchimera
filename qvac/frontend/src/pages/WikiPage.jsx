@@ -1116,6 +1116,9 @@ export default function WikiPage({ onBack }) {
           <button style={s.newPageBtn} onClick={() => { setSelectedDoc(null); setEditorText(''); }}>
             + New Page
           </button>
+          <a href="/docs/LOCALCHIMERA.html" style={{ display: 'block', marginTop: 8, fontSize: 12, color: '#7a7468', textDecoration: 'none' }}>
+            📖 Documentation
+          </a>
         </div>
       </aside>
 
