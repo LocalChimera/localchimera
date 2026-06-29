@@ -293,7 +293,7 @@ export default function App() {
         ref={webViewRef}
         source={{ html: frontendHtml }}
         style={styles.webview}
-        injectedJavaScriptBeforeContentLoaded={frontendJs}
+        injectedJavaScriptBeforeContentLoaded={`try{if(!window.localStorage){window.localStorage={_d:{},getItem:function(k){return this._d[k]||null},setItem:function(k,v){this._d[k]=String(v)},removeItem:function(k){delete this._d[k]},clear:function(){this._d={}},key:function(i){return Object.keys(this._d)[i]||null}};Object.defineProperty(window,'localStorage',{value:window.localStorage,writable:false,configurable:true})}if(!window.sessionStorage){window.sessionStorage={_d:{},getItem:function(k){return this._d[k]||null},setItem:function(k,v){this._d[k]=String(v)},removeItem:function(k){delete this._d[k]},clear:function(){this._d={}},key:function(i){return Object.keys(this._d)[i]||null}};Object.defineProperty(window,'sessionStorage',{value:window.sessionStorage,writable:false,configurable:true})}}catch(e){};${frontendJs}`}
         injectedJavaScript={injectedBridge}
         onMessage={handleWebViewMessage}
         onLoad={() => { console.log('[App] WebView onLoad fired'); setWebLoading(false); }}
