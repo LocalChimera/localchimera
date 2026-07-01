@@ -271,6 +271,23 @@ export default function App() {
         console.log('[Bridge] After 2s, root children:', root ? root.children.length : 'no root');
         if (root && root.innerHTML.length > 0) {
           console.log('[Bridge] React rendered successfully');
+          // Debug: add visible borders to check layout
+          root.style.border = '3px solid red';
+          root.style.minHeight = '200px';
+          if (root.children[0]) { root.children[0].style.border = '2px solid yellow'; }
+          // Debug computed styles
+          var body = document.body;
+          var bodyStyle = window.getComputedStyle(body);
+          console.log('[Bridge] body bg:', bodyStyle.backgroundColor, 'color:', bodyStyle.color, 'display:', bodyStyle.display, 'visibility:', bodyStyle.visibility);
+          var rootStyle = window.getComputedStyle(root);
+          console.log('[Bridge] root bg:', rootStyle.backgroundColor, 'display:', rootStyle.display, 'visibility:', rootStyle.visibility, 'width:', rootStyle.width, 'height:', rootStyle.height);
+          console.log('[Bridge] root offsetWidth:', root.offsetWidth, 'offsetHeight:', root.offsetHeight);
+          // Check first child
+          if (root.children[0]) {
+            var child = root.children[0];
+            var cs = window.getComputedStyle(child);
+            console.log('[Bridge] first child tag:', child.tagName, 'bg:', cs.backgroundColor, 'display:', cs.display, 'w:', child.offsetWidth, 'h:', child.offsetHeight);
+          }
         } else {
           console.log('[Bridge] React did NOT render - root is empty');
         }
@@ -312,6 +329,8 @@ export default function App() {
         allowFileAccess={true}
         allowUniversalAccessFromFileURLs={true}
         originWhitelist={['*']}
+        renderToHardwareTextureAndroid={true}
+        scalesPageToFit={true}
       />
       {webLoading && (
         <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: '#0a0a14', alignItems: 'center', justifyContent: 'center' }}>
@@ -336,6 +355,7 @@ const styles = StyleSheet.create({
   webview: {
     flex: 1,
     width: '100%',
+    backgroundColor: '#0e0d0b',
   },
   text: {
     color: '#e8e2d8',
