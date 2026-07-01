@@ -317,6 +317,8 @@ jobs:
         run: |
           cd apps/mobile-expo
           node_modules/.bin/expo prebuild --platform android --clean
+      - name: Patch react-native-bare-kit for graceful TurboModule fallback
+        run: node apps/mobile-expo/scripts/patch-bare-kit.js
       - name: Set Gradle Java home, heap, and downgrade Compose compiler
         run: |
           echo "org.gradle.java.home=$JAVA_HOME" >> apps/mobile-expo/android/gradle.properties
