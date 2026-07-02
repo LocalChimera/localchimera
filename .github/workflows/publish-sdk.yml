@@ -1,0 +1,80 @@
+name: Publish SDKs to npm
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'browser-sdk/**'
+      - 'sdk/**'
+      - '.github/workflows/publish-sdk.yml'
+
+jobs:
+  publish-browser-sdk:
+    name: Publish @localchimera/browser-sdk
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./browser-sdk
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: https://registry.npmjs.org/
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build
+        run: npm run build
+
+      - name: Publish if version is new
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          NAME=$(node -p "require('./package.json').name")
+          if npm view "$NAME@$VERSION" > /dev/null 2>&1; then
+            echo "$NAME@$VERSION already published. Skipping."
+          else
+            npm publish --access public
+          fi
+
+  publish-sdk:
+    name: Publish @localchimera/sdk
+    runs-on: ubuntu-latest
+    needs: publish-browser-sdk
+    defaults:
+      run:
+        working-directory: ./sdk
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: https://registry.npmjs.org/
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build
+        run: npm run build
+
+      - name: Publish if version is new
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          NAME=$(node -p "require('./package.json').name")
+          if npm view "$NAME@$VERSION" > /dev/null 2>&1; then
+            echo "$NAME@$VERSION already published. Skipping."
+          else
+            npm publish --access public
+          fi
