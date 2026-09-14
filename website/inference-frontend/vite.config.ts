@@ -5,7 +5,7 @@ import { resolve } from 'path'
 
 export default defineConfig({
   plugins: [react(), nodePolyfills({ include: ['buffer', 'process', 'events', 'util', 'stream'], globals: { Buffer: true, process: true } })],
-  base: './',
+  base: '/app/',
   resolve: {
     alias: {
       '@': resolve(__dirname, 'src'),

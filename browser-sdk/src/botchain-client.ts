@@ -1,6 +1,7 @@
-import { ethers } from 'ethers';
+import { createPublicClient, createWalletClient, http, parseEther, keccak256, toUtf8Bytes, zeroAddress, getContract, type PublicClient, type WalletClient, type Address, parseAbi } from 'viem';
 import { TASK_POLICY } from './task-types';
 export { TASK_POLICY };
+export { zeroAddress, parseEther, keccak256, toUtf8Bytes };
 
 export const BOTCHAIN_TESTNET = {
   id: 968,
@@ -25,7 +26,7 @@ export const BOTCHAIN_CONTRACTS = {
   bridgeDispatcher: envOrWindow('BOTCHAIN_BRIDGE_DISPATCHER_ADDRESS'),
 };
 
-export const CHIMERA_COORDINATOR_ABI = [
+export const CHIMERA_COORDINATOR_ABI = parseAbi([
   'event JobRouted(bytes32 indexed jobId, address indexed jobAddress, address indexed provider, uint64 taskType, uint8 policy)',
   'event FallbackRequired(bytes32 indexed jobId, address indexed jobAddress, address indexed fallbackProvider, uint64 taskType, uint256 deadline, uint8 policy)',
   'event FallbackBridged(bytes32 indexed jobId, address indexed jobAddress, uint64 indexed taskType, uint8 policy, uint256 amount, address bridgeDispatcher)',
@@ -37,9 +38,9 @@ export const CHIMERA_COORDINATOR_ABI = [
   'function bridged(address jobAddress) view returns (bool)',
   'function paid(address jobAddress) view returns (bool)',
   'function payVolunteer(address jobAddress, bytes32 responseHash)',
-];
+]);
 
-export const ESCROW_VAULT_ABI = [
+const ESCROW_VAULT_ABI = parseAbi([
   'function getPendingJobs() view returns (bytes32[] jobIds)',
   'function getJob(address jobAddress) view returns (tuple(bytes32 jobId, address consumer, address providerAuthority, bytes32 providerPeerId, bytes32 requestHash, uint64 nonce, uint64 taskType, uint64 validUntil, bytes quoteSignature, uint256 amount, address paymentMint, uint256 providerFeeBps, uint8 state, uint256 createdAt, uint256 providerAckedAt, uint256 providerCompletedAt, uint256 confirmWindowStart, uint256 refundedAt, uint256 settledAt, uint256 disputeId, bytes32 responseHash, bytes teeQuote, uint64 klerosDisputeId, uint64 klerosRuling))',
   'function getJobState(address jobAddress) view returns (uint8)',
@@ -48,14 +49,14 @@ export const ESCROW_VAULT_ABI = [
   'function providerComplete(address jobAddress, bytes32 responseHash, bytes teeQuote)',
   'function consumerConfirm(address jobAddress)',
   'function autoRelease(address jobAddress)',
-];
+]);
 
-export const COMPUTE_REGISTRY_ABI = [
+const COMPUTE_REGISTRY_ABI = parseAbi([
   'function authorityToProvider(address authority) view returns (address provider)',
   'function getProviderStatus(address provider) view returns (uint8)',
   'function registerProvider(bytes32 peerId, string name, uint256 stake)',
   'function minimumStake() view returns (uint256)',
-];
+]);
 
 export const JOB_STATE = {
   PENDING: 0,
@@ -70,47 +71,55 @@ export const JOB_STATE = {
   DISPUTE_PROVIDER_WON: 9,
 };
 
-export function getProviderFromWallet(rpcUrl: string, evmProvider: any): ethers.JsonRpcProvider {
-  return new ethers.JsonRpcProvider(rpcUrl || BOTCHAIN_TESTNET.rpcUrl);
+const botchainChain = {
+  id: BOTCHAIN_TESTNET.id,
+  name: BOTCHAIN_TESTNET.name,
+  nativeCurrency: BOTCHAIN_TESTNET.nativeCurrency,
+  rpcUrls: { default: { http: [BOTCHAIN_TESTNET.rpcUrl] } },
+  blockExplorers: { default: { name: 'Botchain Explorer', url: BOTCHAIN_TESTNET.explorer } },
+};
+
+export function getProviderFromWallet(rpcUrl: string, evmProvider: any): PublicClient {
+  return createPublicClient({
+    chain: botchainChain,
+    transport: http(rpcUrl || BOTCHAIN_TESTNET.rpcUrl),
+  });
 }
 
-export async function getSignerFromWallet(rpcUrl: string, evmProvider: any, address?: string): Promise<ethers.Signer | null> {
+export async function getSignerFromWallet(rpcUrl: string, evmProvider: any, address?: string): Promise<WalletClient | null> {
   try {
-    const browserProvider = new ethers.BrowserProvider(evmProvider, {
-      name: BOTCHAIN_TESTNET.name,
-      chainId: BOTCHAIN_TESTNET.id,
+    return createWalletClient({
+      chain: botchainChain,
+      transport: http(rpcUrl || BOTCHAIN_TESTNET.rpcUrl),
+      account: address ? address as Address : undefined,
     });
-    return await browserProvider.getSigner(address || 0);
   } catch {
     return null;
   }
 }
 
-export function getBotchainContracts(readProvider: ethers.Provider): {
-  escrowVault: ethers.Contract;
-  computeRegistry: ethers.Contract;
-  orderBook: ethers.Contract;
-  reputation: ethers.Contract;
-} {
+export interface BotchainContracts {
+  escrowVault: ReturnType<typeof getContract>;
+  computeRegistry: ReturnType<typeof getContract>;
+  orderBook: ReturnType<typeof getContract>;
+  reputation: ReturnType<typeof getContract>;
+}
+
+export function getBotchainContracts(readClient: PublicClient): BotchainContracts {
   return {
-    escrowVault: new ethers.Contract(BOTCHAIN_CONTRACTS.escrowVault, ESCROW_VAULT_ABI, readProvider),
-    computeRegistry: new ethers.Contract(BOTCHAIN_CONTRACTS.computeRegistry, COMPUTE_REGISTRY_ABI, readProvider),
-    orderBook: new ethers.Contract(BOTCHAIN_CONTRACTS.orderBook, ESCROW_VAULT_ABI, readProvider),
-    reputation: new ethers.Contract(BOTCHAIN_CONTRACTS.reputation, ESCROW_VAULT_ABI, readProvider),
+    escrowVault: getContract({ address: BOTCHAIN_CONTRACTS.escrowVault as Address, abi: ESCROW_VAULT_ABI, client: readClient }),
+    computeRegistry: getContract({ address: BOTCHAIN_CONTRACTS.computeRegistry as Address, abi: COMPUTE_REGISTRY_ABI, client: readClient }),
+    orderBook: getContract({ address: BOTCHAIN_CONTRACTS.orderBook as Address, abi: ESCROW_VAULT_ABI, client: readClient }),
+    reputation: getContract({ address: BOTCHAIN_CONTRACTS.reputation as Address, abi: ESCROW_VAULT_ABI, client: readClient }),
   };
 }
 
-export function getBotchainContractsWithSigner(signer: ethers.Signer): {
-  escrowVault: ethers.Contract;
-  computeRegistry: ethers.Contract;
-  orderBook: ethers.Contract;
-  reputation: ethers.Contract;
-} {
+export function getBotchainContractsWithSigner(walletClient: WalletClient): BotchainContracts {
   return {
-    escrowVault: new ethers.Contract(BOTCHAIN_CONTRACTS.escrowVault, ESCROW_VAULT_ABI, signer),
-    computeRegistry: new ethers.Contract(BOTCHAIN_CONTRACTS.computeRegistry, COMPUTE_REGISTRY_ABI, signer),
-    orderBook: new ethers.Contract(BOTCHAIN_CONTRACTS.orderBook, ESCROW_VAULT_ABI, signer),
-    reputation: new ethers.Contract(BOTCHAIN_CONTRACTS.reputation, ESCROW_VAULT_ABI, signer),
+    escrowVault: getContract({ address: BOTCHAIN_CONTRACTS.escrowVault as Address, abi: ESCROW_VAULT_ABI, client: walletClient }),
+    computeRegistry: getContract({ address: BOTCHAIN_CONTRACTS.computeRegistry as Address, abi: COMPUTE_REGISTRY_ABI, client: walletClient }),
+    orderBook: getContract({ address: BOTCHAIN_CONTRACTS.orderBook as Address, abi: ESCROW_VAULT_ABI, client: walletClient }),
+    reputation: getContract({ address: BOTCHAIN_CONTRACTS.reputation as Address, abi: ESCROW_VAULT_ABI, client: walletClient }),
   };
 }
 

@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
+import "@openzeppelin/contracts/access/Ownable.sol";
 import "./interfaces/IComputeRegistry.sol";
 import "./libraries/Utils.sol";
 
 /// @title ComputeRegistry
 /// @notice Provider registry with staking, metadata, and status management
 /// @dev Implements the Provider Registry from the decentralized compute marketplace architecture
-contract ComputeRegistry is IComputeRegistry {
+contract ComputeRegistry is IComputeRegistry, Ownable {
     using MathLib for uint256;
     using ValidationLib for uint256;
     using ValidationLib for address;
@@ -20,7 +21,6 @@ contract ComputeRegistry is IComputeRegistry {
     mapping(bytes32 => address) public peerIdToProvider; // qvacPeerId => provider address
     mapping(address => uint256) public stakes;
 
-    address public immutable owner;
     uint256 public minimumStakeAmount = 1 ether;
     address public feeRecipient;
 
@@ -28,15 +28,9 @@ contract ComputeRegistry is IComputeRegistry {
     uint256 public constant MIN_TPS = 1;
     uint256 public constant MAX_CONTEXT_TOKENS = 100_000;
 
-    constructor(address _owner, address _feeRecipient, uint256 _minimumStake) {
-        owner = _owner;
+    constructor(address _owner, address _feeRecipient, uint256 _minimumStake) Ownable(_owner) {
         feeRecipient = _feeRecipient;
         minimumStakeAmount = _minimumStake;
-    }
-
-    modifier onlyOwner() {
-        require(msg.sender == owner, "ComputeRegistry: not owner");
-        _;
     }
 
     modifier onlyAuthorized(address providerAddress) {
@@ -240,7 +234,7 @@ contract ComputeRegistry is IComputeRegistry {
     }
 
     function emergencyWithdraw() external onlyOwner {
-        payable(owner).transfer(address(this).balance);
+        payable(owner()).transfer(address(this).balance);
     }
 
     receive() external payable {}

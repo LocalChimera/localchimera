@@ -1,5 +1,0 @@
-[target.wasm32-unknown-unknown]
-rustflags = ["-C", "link-arg=--allow-undefined", "-C", "target-feature=-bulk-memory,-mutable-globals,-multivalue,-reference-types,-simd128", "-C", "codegen-units=1"]
-
-[target.wasm32v1-none]
-rustflags = ["-C", "link-arg=--allow-undefined", "-C", "target-feature=-bulk-memory,-mutable-globals,-multivalue,-reference-types,-simd128", "-C", "codegen-units=1"]

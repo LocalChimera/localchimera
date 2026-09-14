@@ -12,7 +12,8 @@
 
 import { promises as fs } from 'fs';
 import path from 'path';
-import { ethers } from 'ethers';
+import { createWalletClient, createPublicClient, http, parseEther, formatEther } from 'viem';
+import { privateKeyToAccount } from 'viem/accounts';
 import { PayoutStore } from './PayoutStore.js';
 import { Logger } from '../core/Logger.js';
 
@@ -350,17 +351,22 @@ export class PayoutRouter {
       return { success: false, error: d.error, plan };
     }
 
-    const provider = new ethers.JsonRpcProvider(rpcUrl);
-    const wallet = new ethers.Wallet(signingKey, provider);
-    logger.info(`[payout] Sending from ${wallet.address} via ${rpcUrl}`);
+    const account = privateKeyToAccount(signingKey);
+    const chain = { id: this.config.chainId || 42161, name: 'arbitrum', nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 }, rpcUrls: { default: { http: [rpcUrl] } } };
+    const walletClient = createWalletClient({ account, chain, transport: http(rpcUrl) });
+    const publicClient = createPublicClient({ chain, transport: http(rpcUrl) });
+    logger.info(`[payout] Sending from ${account.address} via ${rpcUrl}`);
 
     const txHashes = [];
     const failures = [];
     for (const { address, amount } of plan) {
       try {
-        const tx = await wallet.sendTransaction({ to: address, value: ethers.parseEther(amount.toString()) });
-        logger.info(`[payout] Sent ${amount} ETH → ${address} (${tx.hash})`);
-        txHashes.push({ address, amount, txHash: tx.hash });
+        const hash = await walletClient.sendTransaction({
+          to: address,
+          value: parseEther(amount.toString()),
+        });
+        logger.info(`[payout] Sent ${amount} ETH → ${address} (${hash})`);
+        txHashes.push({ address, amount, txHash: hash });
       } catch (err) {
         logger.error(`[payout] Transfer to ${address} failed: ${err.message}`);
         failures.push({ address, amount, error: err.message });

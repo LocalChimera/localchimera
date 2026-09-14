@@ -6,12 +6,11 @@ Node.js source for the QVAC backend node.
 
 - `api/` — HTTP API route handlers
 - `auth/` — Authentication and session management
-- `casper/` — Casper Network relay integration
 - `cli/` — Command-line tools and entry points
 - `core/` — NodeManager, WalletManager, AuditLogger, ContentAddress, DeploymentLifecycle
 - `inference/` — QVAC inference engine, prompt guard, token metering, voice pipeline, agent loop
 - `llmwiki/` — Upstream bridges: OtterWiki, OpenViking, LLMwiki
-- `miners/` — Tasking network miners (BTT AI, Golem, Anyone, Mysterium, BTFS, Casper, Botchain)
+- `miners/` — Tasking network miners (BTT AI, Golem, Anyone, Mysterium, BTFS, Sentinel, Spheron, Crust, Infernet, Botchain)
 - `orchestrator/` — Fleet commander/worker orchestration
 - `p2p/` — Pear P2P networking, capability manifests, content pinning
 - `payout/` — Protocol payout and sweep logic

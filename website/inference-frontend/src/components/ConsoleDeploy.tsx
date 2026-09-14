@@ -2,12 +2,6 @@ import { useState, useEffect } from 'react';
 import { Rocket, FileCode, Upload, ChevronRight, HardDrive, Wifi, Brain } from 'lucide-react';
 import { Button } from './ui';
 import { saveDeployment, type Deployment } from '../lib/deployments';
-import TaskResourcePanel from './TaskResourcePanel';
-import StorageHub from './StorageHub';
-import * as sdk from 'casper-js-sdk';
-import { CONTRACTS, callEntryPointWithWallet, getDepositBalance } from '../casper-client';
-import { BOTCHAIN_TESTNET, getContracts, getSignerFromWeb3AuthWallet, BOTCHAIN_CONTRACTS } from '../botchain';
-import { ethers } from 'ethers';
 import type { TxRecord } from '../types';
 
 const TABS = ['builder', 'yaml', 'upload'] as const;
@@ -102,23 +96,13 @@ deployment:
 export default function ConsoleDeploy({
   onNavigate,
   walletId,
-  walletMode,
   onCreated,
-  provider,
-  publicKeyHex,
-  accountHash,
-  botchainWallet,
   evmAddress,
   onTx,
 }: {
   onNavigate?: (page: string) => void;
   walletId?: string | null;
-  walletMode?: 'casper' | 'botchain' | 'evm' | null;
   onCreated?: (deployment: Deployment) => void;
-  provider?: any;
-  publicKeyHex?: string;
-  accountHash?: string;
-  botchainWallet?: any;
   evmAddress?: string;
   onTx?: (tx: TxRecord) => void;
 }) {
@@ -191,9 +175,6 @@ export default function ConsoleDeploy({
     if (tabParam && TABS.includes(tabParam)) setTab(tabParam);
   }, []);
 
-  const getTaskType = (): number => 2;
-  const getOrderIdPrefix = (): string => 'COMPUTE';
-
   const deployViaTasker = async (deployment: Deployment, fromAddress?: string) => {
     try {
       const res = await fetch('/api/deploy/' + network, {
@@ -209,77 +190,6 @@ export default function ConsoleDeploy({
     } catch (err: any) {
       return { ok: false, error: err.message || 'Tasker network request failed' };
     }
-  };
-
-  const deployViaCasper = async () => {
-    if (!provider || !publicKeyHex) throw new Error('Casper wallet not connected');
-    const amountMotes = Math.floor(parseFloat(funds || '0.1') * 1e9).toString();
-    const contractHash = CONTRACTS.escrowVault;
-    const accountHash = sdk.PublicKey.fromHex(publicKeyHex).accountHash().toPrefixedString();
-    const orderId = `${getOrderIdPrefix()}:${name}:${image}:${cpu}:${gpu ? 1 : 0}:${memory}:${storage}:${count}:${runtime}:${timeout}:${exposePort}:${command || code || ''}`;
-
-    // Ensure sufficient deposit balance
-    const depositBalance = await getDepositBalance(contractHash, accountHash);
-    if (sdk.U512.fromString(depositBalance).lt(sdk.U512.fromString(amountMotes))) {
-      const depositResult = await callEntryPointWithWallet(provider, publicKeyHex, contractHash, 'deposit', {
-        amount: sdk.CLValue.newCLUInt512(amountMotes),
-      });
-      if (depositResult.error) throw new Error(depositResult.error);
-      if (depositResult.deployHash && onTx) {
-        onTx({ id: Date.now().toString(), deployHash: depositResult.deployHash, entryPoint: 'deposit', contract: 'EscrowVault', status: 'pending' });
-      }
-      await new Promise(r => setTimeout(r, 3000));
-    }
-
-    const result = await callEntryPointWithWallet(provider, publicKeyHex, contractHash, 'create_job', {
-      consumer: sdk.CLValue.newCLByteArray(sdk.PublicKey.fromHex(publicKeyHex).accountHash().toBytes()),
-      provider: sdk.CLValue.newCLByteArray(new Uint8Array(32)),
-      amount: sdk.CLValue.newCLUInt512(amountMotes),
-      provider_fee_bps: sdk.CLValue.newCLUint64('0'),
-      order_id: sdk.CLValue.newCLString(orderId),
-    });
-    if (result.error) throw new Error(result.error);
-    if (result.deployHash && onTx) {
-      onTx({ id: Date.now().toString(), deployHash: result.deployHash, entryPoint: 'create_job', contract: 'EscrowVault', status: 'pending' });
-    }
-    return result;
-  };
-
-  const deployViaBotchain = async () => {
-    if (!botchainWallet || !evmAddress) throw new Error('Botchain wallet not connected');
-    await switchToBotchain(botchainWallet);
-    const signer = await getSignerFromWeb3AuthWallet(botchainWallet);
-    const contracts = {
-      escrowVault: (await import('../botchain')).getContractsWithSigner(signer).escrowVault,
-      computeRegistry: (await import('../botchain')).getContractsWithSigner(signer).computeRegistry,
-    };
-    const amount = ethers.parseEther(funds || '0.1');
-    const balance = await contracts.escrowVault.getBalance(evmAddress);
-    if (balance < amount) {
-      const tx = await contracts.escrowVault.deposit({ value: amount });
-      const receipt = await tx.wait();
-      if (onTx) onTx({ id: Date.now().toString(), hash: receipt?.hash || tx.hash, entryPoint: 'deposit', contract: 'EscrowVault', status: 'success' });
-    }
-    const providers = await contracts.computeRegistry.getActiveProviders();
-    const providerAuthority = providers[0] || ethers.ZeroAddress;
-    if (providerAuthority === ethers.ZeroAddress) throw new Error('No active providers in Botchain registry');
-    const validUntil = Math.floor(Date.now() / 1000) + 3600;
-    const requestHash = ethers.keccak256(ethers.toUtf8Bytes(yaml));
-    const taskType = getTaskType();
-    const tx = await contracts.escrowVault.createJob(
-      providerAuthority,
-      requestHash,
-      Date.now(),
-      taskType,
-      validUntil,
-      '0x',
-      amount,
-      ethers.ZeroAddress,
-      '0x00000000000000000000000000000000'
-    );
-    const receipt = await tx.wait();
-    if (onTx) onTx({ id: Date.now().toString(), hash: receipt?.hash || tx.hash, entryPoint: 'createJob', contract: 'EscrowVault', status: 'success' });
-    return { hash: receipt?.hash || tx.hash };
   };
 
   const handleCreate = async () => {
@@ -303,27 +213,8 @@ export default function ConsoleDeploy({
       owner: walletId,
     };
 
-    // Primary path: smart contract escrow
-    try {
-      if (walletMode === 'casper') {
-        const result = await deployViaCasper();
-        if (result?.error) throw new Error(result.error);
-      } else if (walletMode === 'botchain') {
-        await deployViaBotchain();
-      } else {
-        throw new Error('Unsupported wallet mode for escrow deployment');
-      }
-      saveDeployment(walletId, deployment);
-      if (onCreated) onCreated(deployment);
-      else alert(`Escrow deployment ${deployment.name} (${deployment.id}) created on ${walletMode}.`);
-      return;
-    } catch (err: any) {
-      console.warn('Smart contract deployment failed, falling back to tasker network:', err.message);
-    }
-
-    // Fallback path: tasker network
-    const fallbackFrom = walletMode === 'casper' ? publicKeyHex : evmAddress;
-    const taskerResult = await deployViaTasker(deployment, fallbackFrom);
+    // Deploy via tasker network
+    const taskerResult = await deployViaTasker(deployment, evmAddress);
     if (taskerResult.ok) {
       saveDeployment(walletId, deployment);
       if (onCreated) onCreated(deployment);
@@ -515,7 +406,7 @@ export default function ConsoleDeploy({
                 </div>
               </div>
               <div>
-                <label className="block text-[14px] font-semibold text-foreground mb-2">Funds (CSPR)</label>
+                <label className="block text-[14px] font-semibold text-foreground mb-2">Funds</label>
                 <input type="text" value={funds} onChange={(e) => setFunds(e.target.value)} placeholder="0.1" className="w-full border border-border rounded-[10px] px-4 py-2.5 text-[14px] outline-none focus:border-primary bg-card text-foreground" />
               </div>
             </div>
@@ -567,7 +458,17 @@ export default function ConsoleDeploy({
         </>)}
 
       {mode === 'storage' && (
-        <StorageHub provider={provider} publicKeyHex={publicKeyHex || ''} accountHash={accountHash || ''} onTx={onTx || (() => {})} />
+        <div className="bg-card border border-border rounded-[14px] p-5">
+          <div className="flex items-center gap-3 mb-2">
+            <div className="w-8 h-8 rounded-[10px] bg-primary/10 flex items-center justify-center text-primary">
+              <HardDrive className="w-4 h-4" />
+            </div>
+            <div>
+              <h2 className="text-[16px] font-bold text-foreground">Storage</h2>
+              <p className="text-[13px] text-muted-foreground">Decentralized storage on the Chimera network.</p>
+            </div>
+          </div>
+        </div>
       )}
 
       {mode === 'bandwidth' && (
@@ -583,7 +484,9 @@ export default function ConsoleDeploy({
               </div>
             </div>
           </div>
-          <TaskResourcePanel provider={provider} publicKeyHex={publicKeyHex || ''} accountHash={accountHash || ''} onTx={onTx || (() => {})} fixedResource="bandwidth" />
+          <div className="bg-card border border-border rounded-[14px] p-5">
+            <p className="text-[13px] text-muted-foreground">Bandwidth configuration coming soon.</p>
+          </div>
         </div>
       )}
 
@@ -600,7 +503,9 @@ export default function ConsoleDeploy({
               </div>
             </div>
           </div>
-          <TaskResourcePanel provider={provider} publicKeyHex={publicKeyHex || ''} accountHash={accountHash || ''} onTx={onTx || (() => {})} fixedResource="inference" />
+          <div className="bg-card border border-border rounded-[14px] p-5">
+            <p className="text-[13px] text-muted-foreground">Inference configuration coming soon.</p>
+          </div>
         </div>
       )}
     </div>

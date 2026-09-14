@@ -2,24 +2,22 @@
 set -e
 
 DIST_DIR="./dist"
-CONSOLE_DIR="../../website-new/console"
 
-copy_dist() {
-  local dest="$1"
-  mkdir -p "$dest"
-  rm -rf "$dest/assets" "$dest/index.html" "$dest/deploy-escrow.html"
-  cp "$DIST_DIR/index.html" "$dest/index.html"
-  cp -r "$DIST_DIR/assets" "$dest/assets" 2>/dev/null || true
-  for asset in "$DIST_DIR"/*.png "$DIST_DIR"/*.svg "$DIST_DIR"/*.jpg "$DIST_DIR"/*.jpeg "$DIST_DIR"/*.wasm; do
-    if [ -f "$asset" ]; then
-      cp "$asset" "$dest/"
-    fi
-  done
-  if [ -f "$DIST_DIR/deploy-escrow.html" ]; then
-    cp "$DIST_DIR/deploy-escrow.html" "$dest/"
-  fi
-}
+# Restructure dist/ so the landing page is at root and the SPA is at /app/
+# 1. Create dist/app/ and move Vite-built SPA files there
+mkdir -p "$DIST_DIR/app"
+mv "$DIST_DIR/index.html" "$DIST_DIR/app/index.html"
+mv "$DIST_DIR/assets" "$DIST_DIR/app/assets" 2>/dev/null || true
+for f in deploy-escrow.html compute_registry.wasm; do
+  [ -f "$DIST_DIR/$f" ] && mv "$DIST_DIR/$f" "$DIST_DIR/app/$f"
+done
 
-# Copy the built inference app into the root console directory so it serves at /console
-copy_dist "$CONSOLE_DIR"
-echo "Post-build: inference app copied to /console/"
+# 2. Copy landing page to dist/index.html (root)
+cp "$DIST_DIR/landing.html" "$DIST_DIR/index.html"
+
+# 3. Ensure dashboard assets are copied (Vite may skip nested public dirs)
+mkdir -p "$DIST_DIR/dashboard/assets"
+cp -r public/dashboard/assets/* "$DIST_DIR/dashboard/assets/" 2>/dev/null || true
+cp public/dashboard/index.html "$DIST_DIR/dashboard/index.html" 2>/dev/null || true
+
+echo "Post-build: landing page at /, SPA at /app/, dashboard at /dashboard/"

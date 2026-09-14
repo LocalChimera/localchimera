@@ -1,46 +1,26 @@
 import 'dotenv/config';
-import { RequestNetwork } from '@requestnetwork/request-client.js';
-import { EthereumPrivateKeySignatureProvider } from '@requestnetwork/epk-signature';
 import { pollPendingOrders, updateOrderStatus } from './kv-store.js';
 import { verifyPayment } from './payment-detector.js';
 import { provisionResource } from './provision/index.js';
 import { recordDeployment, startScalingController } from './scaling-controller.js';
 import { JobDispatcher } from './dispatcher/job-dispatcher.js';
 
-const RPC_URL = process.env.RPC_URL || 'https://sepolia.gateway.request.network/';
-const PRIVATE_KEY = process.env.PRIVATE_KEY;
 const POLL_INTERVAL_MS = Number(process.env.POLL_INTERVAL_MS || '30000');
-
-if (!PRIVATE_KEY) {
-  throw new Error('PRIVATE_KEY env var is required');
-}
-
-const signatureProvider = new EthereumPrivateKeySignatureProvider({
-  method: 'private-key',
-  key: PRIVATE_KEY,
-});
-
-const requestNetwork = new RequestNetwork({
-  nodeConnectionConfig: { baseURL: RPC_URL },
-  signatureProvider,
-});
 
 async function processOrder(order) {
   console.log(`[provisioner] processing order ${order.id}`);
 
   try {
-    // 1. Verify payment via Request Network
-    const paymentStatus = await verifyPayment(requestNetwork, order.requestId);
+    // 1. Verify payment via on-chain escrow (ERC-8184 voucher)
+    const paymentStatus = await verifyPayment(order.channelId, order.voucher);
     if (!paymentStatus.paid) {
-      console.log(`[provisioner] order ${order.id} not paid yet`);
+      console.log(`[provisioner] order ${order.id} not paid yet (state: ${paymentStatus.state})`);
       return;
     }
 
     await updateOrderStatus(order.id, 'payment_confirmed', { txHash: paymentStatus.txHash });
 
     // 2. Provision the resource
-    // On-chain bridging and token conversion are handled by the ChimeraBridgeDispatcher (Li.Fi),
-    // so the worker no longer swaps via CoW Protocol.
     const provision = await provisionResource(order.resourceType, {
       quantity: order.quantity,
       recipient: order.payerAddress,
@@ -54,7 +34,7 @@ async function processOrder(order) {
       provisionId: provision.id,
     });
 
-    // 4. Register the deployment for scaling via Streamr
+    // 3. Register the deployment for scaling via Streamr
     await recordDeployment(provision.id, {
       resourceType: order.resourceType,
       quantity: order.quantity,
@@ -73,7 +53,7 @@ async function processOrder(order) {
 }
 
 async function main() {
-  console.log('[provisioner] worker started');
+  console.log('[provisioner] worker started — onchain escrow (ERC-8184) on Robinhood Chain');
 
   // Start scaling controller in the background.
   startScalingController().catch((err) => {
@@ -82,7 +62,7 @@ async function main() {
 
   // Start escrow fallback dispatcher (volunteer -> tasking network).
   const dispatcher = new JobDispatcher({
-    fallbackRecipient: process.env.FALLBACK_RECIPIENT || PRIVATE_KEY,
+    fallbackRecipient: process.env.FALLBACK_RECIPIENT || '',
     inferenceTokens: Number(process.env.FALLBACK_INFERENCE_TOKENS || '512'),
     inferenceModel: process.env.FALLBACK_INFERENCE_MODEL || 'llama-3.2-1b',
     computeHours: Number(process.env.FALLBACK_COMPUTE_HOURS || '1'),

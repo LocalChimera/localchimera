@@ -1,21 +1,10 @@
 import { promises as fsp } from 'fs';
 import path from 'path';
+import winston from 'winston';
 
 /**
  * AuditLogger — structured JSON-Lines audit log for model lifecycle and
- * inference performance. Writes one JSON object per line to a rotating log
- * file under data/audit/.
- *
- * Log schema (per event type):
- *   modelLoad   : { ts, type: 'modelLoad',   modelId, durationMs, source }
- *   modelUnload : { ts, type: 'modelUnload', modelId, source }
- *   inference   : { ts, type: 'inference',   prompt, outputTokens, durationMs, ttftMs, tokensPerSec, modelId, source, routeId }
- *   embedding   : { ts, type: 'embedding',   textCount, dimension, durationMs, modelId }
- *   ragIngest   : { ts, type: 'ragIngest',   docCount, workspace, durationMs, modelId }
- *   ragSearch   : { ts, type: 'ragSearch',   query, topK, matchCount, durationMs, modelId }
- *
- * Demo / inspection:
- *   node -e "const fs=require('fs'); fs.readFileSync('data/audit/YYYY-MM-DD.jsonl','utf-8').split('\\n').slice(0,5).forEach(l=>l&&console.log(JSON.parse(l)))"
+ * inference performance. Uses winston (MIT) for logging with daily rotation.
  */
 export class AuditLogger {
   constructor(config = {}) {
@@ -26,6 +15,18 @@ export class AuditLogger {
     this._flushIntervalMs = config.flushIntervalMs || 1000;
     this._linesInCurrentFile = 0;
     this._currentDate = this._today();
+
+    this._logger = winston.createLogger({
+      level: 'info',
+      format: winston.format.json(),
+      transports: [
+        new winston.transports.File({
+          filename: path.join(this.baseDir, `${this._currentDate}.jsonl`),
+          options: { flags: 'a' },
+        }),
+      ],
+    });
+
     this._startFlushTimer();
   }
 
@@ -57,17 +58,26 @@ export class AuditLogger {
   async flush() {
     if (this._buffer.length === 0) return;
     const batch = this._buffer.splice(0, this._buffer.length);
-    const lines = batch.map(e => JSON.stringify(e)).join('\n') + '\n';
-    await this._ensureDir();
 
-    // Rotate if we've crossed the daily boundary or line limit
     const today = this._today();
     if (today !== this._currentDate || this._linesInCurrentFile >= this.maxLinesPerFile) {
       this._currentDate = today;
       this._linesInCurrentFile = 0;
+      this._logger = winston.createLogger({
+        level: 'info',
+        format: winston.format.json(),
+        transports: [
+          new winston.transports.File({
+            filename: path.join(this.baseDir, `${this._currentDate}.jsonl`),
+            options: { flags: 'a' },
+          }),
+        ],
+      });
     }
 
-    await fsp.appendFile(this._filePath(), lines, 'utf-8');
+    for (const event of batch) {
+      this._logger.info(event.type, event);
+    }
     this._linesInCurrentFile += batch.length;
   }
 

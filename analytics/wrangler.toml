@@ -1,0 +1,30 @@
+name = "chimera-analytics"
+compatibility_date = "2024-12-01"
+main = "src/index.ts"
+account_id = "f6aff821e92502a4c148dfdcbc082a14"
+
+routes = [
+  { pattern = "analytics.localchimera.com", custom_domain = true }
+]
+
+[vars]
+# v1 contracts (deprecated — ETH-based)
+ESCROW_CHANNEL_ADDRESS = "0xa081d022bFFDeE898CC0Bd1Cd956BA982650E60A"
+CHIMERA_COORDINATOR_ADDRESS = "0x2583006159d8cCe0E49C91dA8c7cc52D369624A6"
+CHIMERA_PROOF_OF_INFERENCE_ADDRESS = "0xCf3005d6682FAD55a12e5246d2Db6f7Fb0775eB2"
+# v2 tokenomics contracts (CHIMERA-based — TBD after deployment)
+CHIMERA_TOKEN_ADDRESS = "0x"
+CHIMERA_STAKING_ADDRESS = "0x"
+CHIMERA_COORDINATOR_V2_ADDRESS = "0x"
+CHIMERA_PROOF_OF_INFERENCE_V2_ADDRESS = "0x"
+ESCROW_CHANNEL_V2_ADDRESS = "0x"
+CHIMERA_TIMELOCK_ADDRESS = "0x"
+CHIMERA_GOVERNANCE_ADDRESS = "0x"
+
+[[kv_namespaces]]
+binding = "chimera_analytics_events"
+id = "6183165862c64e598883724539c3bbfd"
+
+[assets]
+directory = "./public"
+binding = "ASSETS"

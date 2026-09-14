@@ -21,9 +21,11 @@ export {
   GolemProvider,
   AnyoneProtocolProvider,
   MysteriumProvider,
-  CasperProvider,
   BtfsStorageProvider,
-  StorjProvider,
+  SentinelProvider,
+  SpheronProvider,
+  CrustProvider,
+  InfernetProvider,
   getProtocolPayoutAddress,
   DEFAULT_PROTOCOL_PAYOUT_ADDRESS,
 } from './miners/index.js';

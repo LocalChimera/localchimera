@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
+import "@openzeppelin/contracts/access/Ownable.sol";
 import "./interfaces/IReputation.sol";
 import "./interfaces/IComputeRegistry.sol";
 import "./libraries/Utils.sol";
@@ -8,7 +9,7 @@ import "./libraries/Utils.sol";
 /// @title Reputation
 /// @notice Reputation scoring with job tracking, ratings anchoring, and slashing
 /// @dev Implements the Reputation Ledger from the decentralized compute marketplace architecture
-contract Reputation is IReputation {
+contract Reputation is IReputation, Ownable {
     using MathLib for uint256;
     using ValidationLib for uint256;
     using ValidationLib for address;
@@ -21,7 +22,6 @@ contract Reputation is IReputation {
     // For ranking - simple counter of providers with score > X
     mapping(uint256 => uint256) public scoreDistribution; // score => count
     
-    address public immutable owner;
     address public immutable computeRegistry;
     address public escrowVault;
 
@@ -32,21 +32,15 @@ contract Reputation is IReputation {
     uint256 public constant EARNED_WEIGHT = 1; // 0.1 * (totalEarned / 1e18)
     uint256 public constant RATING_WEIGHT = 100;
 
-    constructor(address _owner, address _computeRegistry, address _escrowVault) {
-        owner = _owner;
+    constructor(address _owner, address _computeRegistry, address _escrowVault) Ownable(_owner) {
         computeRegistry = _computeRegistry;
         escrowVault = _escrowVault;
-    }
-
-    modifier onlyOwner() {
-        require(msg.sender == owner, "Reputation: not owner");
-        _;
     }
 
     modifier onlyAuthorized() {
         // Only escrow vault and compute registry can call these
         // In practice, this would be a role-based access control
-        require(msg.sender == computeRegistry || msg.sender == owner || msg.sender == escrowVault, "Reputation: not authorized");
+        require(msg.sender == computeRegistry || msg.sender == owner() || msg.sender == escrowVault, "Reputation: not authorized");
         _;
     }
 
@@ -67,7 +61,7 @@ contract Reputation is IReputation {
 
     // Updated modifier to use the mapping
     modifier onlyAuthorizedAny() {
-        require(msg.sender == computeRegistry || msg.sender == owner || msg.sender == escrowVault || authorizedCallers[msg.sender], "Reputation: not authorized");
+        require(msg.sender == computeRegistry || msg.sender == owner() || msg.sender == escrowVault || authorizedCallers[msg.sender], "Reputation: not authorized");
         _;
     }
 

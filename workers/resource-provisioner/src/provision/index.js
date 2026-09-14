@@ -1,24 +1,25 @@
 import { provisionGolem } from './golem.js';
-import { provisionAkash } from './akash.js';
+import { provisionSpheron } from './spheron.js';
 import { provisionBtfs } from './btfs.js';
-import { provisionStorj } from './storj.js';
+import { provisionCrust } from './crust.js';
 import { provisionMysterium } from './mysterium.js';
 import { provisionAnyone } from './anyone.js';
+import { provisionSentinel } from './sentinel.js';
 import { provisionBttAi } from './btt-ai.js';
-import { provisionCasper } from './casper.js';
+import { provisionInfernet } from './infernet.js';
 
 const provisioners = {
   'golem-compute': provisionGolem,
   'golem-deployment-alpine': provisionGolem,
   'golem-deployment-nginx': provisionGolem,
-  'akash-compute': provisionAkash,
-  'akash-inference': provisionAkash,
+  'spheron-compute': provisionSpheron,
   'btfs-storage': provisionBtfs,
-  'storj-storage': provisionStorj,
+  'crust-storage': provisionCrust,
   'mysterium-bandwidth': provisionMysterium,
   'anyone-bandwidth': provisionAnyone,
+  'sentinel-bandwidth': provisionSentinel,
   'btt-ai-inference': provisionBttAi,
-  'casper-compute': provisionCasper,
+  'infernet-inference': provisionInfernet,
 };
 
 export async function provisionResource(resourceType, params) {

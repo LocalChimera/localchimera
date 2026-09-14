@@ -1,18 +1,12 @@
 import { Logger } from '../core/Logger.js';
+import { listModels } from '@huggingface/hub';
 
 /**
  * ModelRegistry — tracks available models on the node with metadata.
  *
- * Inspired by Sanctum's model registry: maintains a catalog of models
- * that can be loaded, their capabilities (context length, quantization,
- * type), and current load status. Integrates with:
- *   - QVACInferenceLayer hot-swapping (which models can be switched to)
- *   - CapabilityManifest (advertise accurate model inventory to peers)
- *   - VoicePipeline (which models are available for STT/summary/embedding)
- *
- * Model entry:
- *   { name, type, contextLength, quantization, modelConst,
- *     loaded, lastUsed, loadCount, avgInferenceMs, status }
+ * Uses @huggingface/hub (Apache-2.0) for model discovery from HuggingFace Hub.
+ * Maintains a catalog of models that can be loaded, their capabilities
+ * (context length, quantization, type), and current load status.
  */
 
 export class ModelRegistry {
@@ -175,5 +169,31 @@ export class ModelRegistry {
       }, {}),
       defaultModel: this._defaultModel,
     };
+  }
+
+  /**
+   * Discover models from HuggingFace Hub by task type.
+   * @param {string} task - e.g., 'text-generation', 'embedding', 'automatic-speech-recognition'
+   * @param {number} limit - max results
+   */
+  async discoverFromHub(task = 'text-generation', limit = 20) {
+    try {
+      const models = [];
+      for await (const model of listModels({ search: { task }, limit })) {
+        this.register({
+          name: model.name,
+          type: task === 'text-generation' ? 'llm' : task === 'embedding' ? 'embedding' : 'stt',
+          contextLength: 4096,
+          quantization: 'q4_0',
+          metadata: { hubId: model.id, downloads: model.downloads, likes: model.likes },
+        });
+        models.push(model.name);
+      }
+      this.logger.info(`Discovered ${models.length} models from HuggingFace Hub (task: ${task})`);
+      return models;
+    } catch (e) {
+      this.logger.warn(`Hub discovery failed: ${e.message}`);
+      return [];
+    }
   }
 }

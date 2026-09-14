@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
+import "@openzeppelin/contracts/access/Ownable.sol";
 import "./interfaces/IOrderBook.sol";
 import "./interfaces/IComputeRegistry.sol";
 import "./libraries/Utils.sol";
@@ -8,7 +9,7 @@ import "./libraries/Utils.sol";
 /// @title OrderBook
 /// @notice On-chain order book mirror for limit orders and matchmaking
 /// @dev Implements the Order Book from the decentralized compute marketplace architecture
-contract OrderBook is IOrderBook {
+contract OrderBook is IOrderBook, Ownable {
     using MathLib for uint256;
     using ValidationLib for uint256;
     using ValidationLib for uint64;
@@ -30,20 +31,13 @@ contract OrderBook is IOrderBook {
     mapping(address => bytes32[]) public consumerMatches;
 
     address public immutable computeRegistry;
-    address public immutable owner;
 
     // Constants
     uint256 public constant MIN_PRICE = 1;
     uint256 public constant MAX_EXPIRY = 365 days;
 
-    constructor(address _computeRegistry, address _owner) {
+    constructor(address _computeRegistry, address _owner) Ownable(_owner) {
         computeRegistry = _computeRegistry;
-        owner = _owner;
-    }
-
-    modifier onlyOwner() {
-        require(msg.sender == owner, "OrderBook: not owner");
-        _;
     }
 
     modifier orderExists(bytes32 orderId) {

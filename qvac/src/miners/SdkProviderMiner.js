@@ -4,7 +4,7 @@ import { Logger } from '../core/Logger.js';
  * SdkProviderMiner — wraps an SDK provider (@chimera/sdk) into the QVAC MinerManager interface.
  *
  * This allows SDK providers (BTT AI Miner, Golem, Anyone Protocol,
- * Mysterium, BTFS, Casper) to appear in the desktop app alongside
+ * Mysterium, BTFS, Sentinel, Spheron, Crust, Infernet) to appear in the desktop app alongside
  * native QVAC miners.
  */
 export class SdkProviderMiner {
@@ -22,8 +22,10 @@ export class SdkProviderMiner {
   async initialize() {
     this.logger.info(`Initializing SDK provider wrapper for ${this.name}...`);
     try {
-      this.provider = new this.ProviderClass(this.config);
-      if (typeof this.provider.init === 'function') {
+      if (this.ProviderClass) {
+        this.provider = new this.ProviderClass(this.config);
+      }
+      if (this.provider && typeof this.provider.init === 'function') {
         await this.provider.init();
       }
       this.logger.info(`${this.name} SDK provider initialized`);

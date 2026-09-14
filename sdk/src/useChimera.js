@@ -21,20 +21,20 @@ import {
   Component,
 } from 'react';
 
-import { WagmiProvider, createConfig, useAccount, useSignMessage, useDisconnect, useConnect } from 'wagmi';
+import { WagmiProvider, createConfig, useAccount, useSignMessage, useDisconnect, useConnect, useWalletClient, usePublicClient } from 'wagmi';
 import { mainnet, sepolia } from 'wagmi/chains';
 import { walletConnect } from 'wagmi/connectors';
-import { http } from 'viem';
+import { http, getContract, keccak256, toUtf8Bytes, parseEther, zeroAddress, decodeEventLog, parseAbi } from 'viem';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ConnectKitProvider } from 'connectkit';
 import { fetchWeb3AuthConfig, fetchWalletJwt, createMpcWalletFromJwt } from './web3auth-helpers.js';
 import { checkForUpdates, onUpdateAvailable, getSDKVersion } from './core/update-checker.js';
 import { TASK_TYPE_BOTCHAIN } from './core/task-types.js';
 
-const CHIMERA_COORDINATOR_ABI = [
+const CHIMERA_COORDINATOR_ABI = parseAbi([
   'function createJob(bytes32 requestHash, uint64 nonce, uint64 taskType, uint64 validUntil, bytes quoteSignature, address paymentMint, bytes16 refId, uint8 policy) payable returns (address jobAddress, bytes32 jobId)',
   'event JobRouted(bytes32 indexed jobId, address indexed jobAddress, address indexed provider, uint64 taskType, uint8 policy)',
-];
+]);
 
 export const TASK_POLICY = {
   HYBRID: 0,
@@ -89,6 +89,8 @@ function useChimeraInner(opts = {}) {
   const { signMessageAsync } = useSignMessage();
   const { disconnectAsync: disconnectEvm } = useDisconnect();
   const { connect } = useConnect();
+  const { data: walletClient } = useWalletClient();
+  const publicClient = usePublicClient();
   const [web3AuthConfig, setWeb3AuthConfig] = useState(null);
   const [walletState, setWalletState] = useState({
     connected: false,
@@ -154,7 +156,7 @@ function useChimeraInner(opts = {}) {
           ...prev,
           running: node.running || false,
           providers: [
-            { provider: 'casper-escrow', running: node.running, jobsProcessed: node.jobsProcessed, jobsFailed: node.jobsFailed },
+            { provider: 'evm-escrow', running: node.running, jobsProcessed: node.jobsProcessed, jobsFailed: node.jobsFailed },
           ],
           containerized: false,
           browserMode: true,
@@ -345,19 +347,17 @@ function useChimeraInner(opts = {}) {
       try {
         const { BrowserNode } = await import('@localchimera/browser-sdk');
         let node;
-        if (walletState.chain === 'casper') {
-          node = new BrowserNode(walletState.provider, walletState.walletAdapterAddress, walletAddress);
-        } else if (walletState.chain === 'evm') {
+        if (walletState.chain === 'evm') {
           node = new BrowserNode({ evmProvider: walletState.provider, evmAddress: walletAddress });
         } else {
-          return { success: false, error: 'Browser mode requires a Casper or EVM wallet' };
+          return { success: false, error: 'Browser mode requires an EVM wallet' };
         }
         node.onStatusUpdate((nodeStatus) => {
           setStatus(prev => ({
             ...prev,
             running: nodeStatus.running,
             providers: [{
-              provider: 'casper-escrow',
+              provider: 'evm-escrow',
               running: nodeStatus.running,
               jobsProcessed: nodeStatus.jobsProcessed,
               jobsFailed: nodeStatus.jobsFailed,
@@ -534,35 +534,37 @@ function useChimeraInner(opts = {}) {
       return { success: false, error: 'No ChimeraCoordinator address configured. Set CHIMERA_COORDINATOR_ADDRESS.' };
     }
     try {
-      const ethersProvider = new ethers.BrowserProvider(provider);
-      const signer = await ethersProvider.getSigner();
-      const coordinator = new ethers.Contract(coordinatorAddress, CHIMERA_COORDINATOR_ABI, signer);
-      const requestHash = task.requestHash || ethers.keccak256(ethers.toUtf8Bytes(JSON.stringify(task.payload || {})));
+      if (!walletClient) throw new Error('No wallet client available');
+      const coordinator = getContract({
+        address: coordinatorAddress,
+        abi: CHIMERA_COORDINATOR_ABI,
+        client: walletClient,
+      });
+      const requestHash = task.requestHash || keccak256(toUtf8Bytes(JSON.stringify(task.payload || {})));
       const nonce = task.nonce || Math.floor(Math.random() * 1e9);
       const taskType = task.taskType || TASK_TYPE_BOTCHAIN.INFERENCE;
       const validUntil = task.validUntil || Math.floor(Date.now() / 1000) + 3600;
-      const escrow = ethers.parseEther(String(task.escrow || '0.01'));
-      const tx = await coordinator.createJob(
+      const escrow = parseEther(String(task.escrow || '0.01'));
+      const hash = await coordinator.write.createJob([
         requestHash,
-        nonce,
-        taskType,
-        validUntil,
+        BigInt(nonce),
+        BigInt(taskType),
+        BigInt(validUntil),
         '0x',
-        ethers.ZeroAddress,
+        zeroAddress,
         '0x00000000000000000000000000000000',
         policy,
-        0,
-        { value: escrow }
-      );
-      const receipt = await tx.wait();
+        0n,
+      ], { value: escrow, account: walletClient.account });
+      const receipt = await publicClient.waitForTransactionReceipt({ hash });
       const routed = receipt?.logs
-        ?.map((log) => { try { return coordinator.interface.parseLog(log); } catch { return null; } })
-        ?.find((parsed) => parsed && parsed.name === 'JobRouted');
+        ?.map((log) => { try { return decodeEventLog({ abi: CHIMERA_COORDINATOR_ABI, data: log.data, topics: log.topics }); } catch { return null; } })
+        ?.find((parsed) => parsed && parsed.eventName === 'JobRouted');
       return {
         success: true,
         policy,
         taskType,
-        txHash: tx.hash,
+        txHash: hash,
         jobAddress: routed?.args?.jobAddress,
         jobId: routed?.args?.jobId,
         provider: routed?.args?.provider,
@@ -576,7 +578,7 @@ function useChimeraInner(opts = {}) {
     } catch (e) {
       return { success: false, error: e.message, policy };
     }
-  }, [walletAddress, provider, walletState.chain]);
+  }, [walletAddress, walletClient, publicClient, walletState.chain]);
 
   return {
     ready,

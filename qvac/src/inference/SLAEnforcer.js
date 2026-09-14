@@ -1,17 +1,10 @@
 import { Logger } from '../core/Logger.js';
+import pTimeout from 'p-timeout';
 
 /**
  * SLAEnforcer — per-request timeout enforcement with automatic refund.
  *
- * Inspired by InferMart's SLA enforcement: each inference request gets
- * a deadline. If the model doesn't respond within the timeout, the
- * request is aborted and the token meter issues a refund.
- *
- * Integration points:
- *   - QVACInferenceLayer: wraps _runQVAC with a timeout promise
- *   - TokenMeter: refund on timeout
- *   - CircuitBreaker: record failure on timeout
- *   - AuditLogger: log timeout events
+ * Uses p-timeout (MIT) for timeout enforcement.
  *
  * SLA levels:
  *   - standard: 30s timeout (default)
@@ -62,50 +55,37 @@ export class SLAEnforcer {
 
     const timeout = options.timeoutMs || this.getTimeout(options.level);
     this._stats.totalRequests++;
+    const startedAt = Date.now();
+    this._activeTimers.set(requestId, { startedAt, timeout });
 
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
+    try {
+      const result = await pTimeout(fn(), { milliseconds: timeout });
+      this._activeTimers.delete(requestId);
+      const duration = Date.now() - startedAt;
+      this._updateAvgDuration(duration);
+
+      if (duration > timeout * 0.8) {
+        this.logger.warn(`SLA near-miss for ${requestId}: ${duration}ms / ${timeout}ms`);
+      }
+
+      return result;
+    } catch (err) {
+      this._activeTimers.delete(requestId);
+      if (err.name === 'TimeoutError') {
         this._stats.timeouts++;
         this._stats.slaBreaches++;
-        this._activeTimers.delete(requestId);
-
         const error = new Error(`SLA timeout: request ${requestId} exceeded ${timeout}ms`);
         error.code = 'SLA_TIMEOUT';
         error.requestId = requestId;
         error.timeoutMs = timeout;
-
         this.logger.warn(`SLA timeout for ${requestId} (${timeout}ms)`);
-
         if (options.onTimeout) {
           try { options.onTimeout(error); } catch (e) { this.logger.error(`onTimeout callback error: ${e.message}`); }
         }
-
-        reject(error);
-      }, timeout);
-
-      this._activeTimers.set(requestId, { timer, startedAt: Date.now(), timeout });
-
-      fn()
-        .then((result) => {
-          clearTimeout(timer);
-          this._activeTimers.delete(requestId);
-
-          const duration = Date.now() - this._activeTimers.get(requestId)?.startedAt || 0;
-          this._updateAvgDuration(duration);
-
-          // Check if SLA was barely met (>80% of timeout)
-          if (duration > timeout * 0.8) {
-            this.logger.warn(`SLA near-miss for ${requestId}: ${duration}ms / ${timeout}ms`);
-          }
-
-          resolve(result);
-        })
-        .catch((err) => {
-          clearTimeout(timer);
-          this._activeTimers.delete(requestId);
-          reject(err);
-        });
-    });
+        throw error;
+      }
+      throw err;
+    }
   }
 
   /**

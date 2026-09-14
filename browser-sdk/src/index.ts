@@ -3,15 +3,7 @@
  *
  * Run a tasker network node entirely in the browser. No download required.
  *
- * Supports both Casper Wallet and Web3Auth (EVM/Botchain) wallets.
- * Full job processing is currently implemented for Casper; EVM mode is scaffolded.
- *
- * Usage (Casper):
- *   import { BrowserNode } from '@localchimera/browser-sdk';
- *
- *   const node = new BrowserNode(casperWalletProvider, publicKeyHex, accountHash);
- *   node.onStatusUpdate(status => console.log(status));
- *   await node.start();
+ * Supports Web3Auth (EVM/Robinhood Chain) wallets.
  *
  * Usage (Web3Auth / EVM):
  *   import { BrowserNode, connectWeb3Auth } from '@localchimera/browser-sdk';
@@ -68,14 +60,3 @@ export type { CoordinatorClientOptions } from './coordinator-client';
 export { RomaRouter, createRomaApiHandler } from './roma-router';
 export type { RomaSubTask, RomaTaskType, RomaExecutionResult } from './roma-router';
 
-export {
-  CONTRACTS,
-  getContractNamedKeys,
-  queryDictionary,
-  callEntryPointWithWallet,
-  callEntryPoint,
-  getDeployStatus,
-  getAccountBalance,
-  getRegisteredProviders,
-} from './casper-client';
-export type { ContractConfig } from './casper-client';

@@ -2,19 +2,18 @@ import React, { createContext, useContext, useEffect, useMemo, useRef, useState,
 import { Web3Auth } from '@web3auth/modal';
 import { CHAIN_NAMESPACES, WEB3AUTH_NETWORK } from '@web3auth/base';
 import { EthereumPrivateKeyProvider } from '@web3auth/ethereum-provider';
-import { BOTCHAIN_TESTNET } from './botchain';
-
-const CHAIN_HEX = '0x' + BOTCHAIN_TESTNET.id.toString(16);
+const CHAIN_ID = 1;
+const CHAIN_HEX = '0x' + CHAIN_ID.toString(16);
 
 const chainConfig = {
   chainNamespace: CHAIN_NAMESPACES.EIP155,
   chainId: CHAIN_HEX,
-  rpcTarget: BOTCHAIN_TESTNET.rpcUrls.default.http[0],
-  displayName: BOTCHAIN_TESTNET.name,
-  blockExplorerUrl: BOTCHAIN_TESTNET.blockExplorers?.default?.url || '',
-  ticker: BOTCHAIN_TESTNET.nativeCurrency.symbol,
-  tickerName: BOTCHAIN_TESTNET.nativeCurrency.name,
-  decimals: BOTCHAIN_TESTNET.nativeCurrency.decimals,
+  rpcTarget: 'https://ethereum.publicnode.com',
+  displayName: 'Ethereum',
+  blockExplorerUrl: 'https://etherscan.io',
+  ticker: 'ETH',
+  tickerName: 'Ether',
+  decimals: 18,
 };
 
 const privateKeyProvider = new EthereumPrivateKeyProvider({ config: { chainConfig } });

@@ -33,6 +33,7 @@ export function serviceUnavailable(res, error) {
 }
 
 export function parseBody(req) {
+  if (req.body !== undefined) return Promise.resolve(req.body);
   return new Promise((resolve, reject) => {
     let body = '';
     req.on('data', chunk => { body += chunk; });

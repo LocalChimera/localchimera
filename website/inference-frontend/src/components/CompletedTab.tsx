@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Card, Badge } from './ui';
 import { RefreshCw, Brain, HardDrive, Cpu, Wifi, CheckCircle } from 'lucide-react';
-import { CONTRACTS, getContractNamedKeys, queryDictionary } from '../casper-client';
 
 interface CompletedTask {
   id: string;
@@ -23,48 +22,24 @@ export default function CompletedTab() {
 
   const loadData = useCallback(async () => {
     setLoading(true);
-    const all: CompletedTask[] = [];
-
     try {
-      // Query escrow vault for all jobs — categorize by request_hash prefix
-      const evKeys = await getContractNamedKeys(CONTRACTS.escrowVault);
-      const jobsUref = evKeys['jobs_dict'];
-      const pendingUref = evKeys['pending_jobs'];
-      if (jobsUref && pendingUref) {
-        const pendingList = await queryDictionary(pendingUref, 'list');
-        const jobIds: string[] = Array.isArray(pendingList) ? pendingList as string[] : [];
-        for (const id of jobIds) {
-          const state = await queryDictionary(jobsUref, `${id}:state`);
-          if (state === null || state === undefined) continue;
-          const stateNum = Number(state);
-          if (stateNum < 2) continue;
-          const statusStr = JOB_STATUS[String(stateNum)] || String(stateNum);
-          const amount = Number(await queryDictionary(jobsUref, `${id}:amount`) || '0');
-          const requestHash = String(await queryDictionary(jobsUref, `${id}:request_hash`) || '');
-
-          let market = 'Inference', marketIcon = 'brain', details = requestHash.slice(0, 40) || id;
-          if (requestHash.startsWith('STORAGE:')) {
-            market = 'Storage'; marketIcon = 'harddrive';
-            details = requestHash.slice(0, 40);
-          } else if (requestHash.startsWith('COMPUTE:')) {
-            market = 'Compute'; marketIcon = 'cpu';
-            details = requestHash.slice(0, 40);
-          } else if (requestHash.startsWith('BANDWIDTH:')) {
-            market = 'Bandwidth'; marketIcon = 'wifi';
-            details = requestHash.slice(0, 40);
-          }
-
-          all.push({ id, market, marketIcon, amount, status: statusStr, details });
-        }
-      }
+      const res = await fetch('/api/market/completed');
+      const data = await res.json().catch(() => ({}));
+      const all: CompletedTask[] = (data.tasks || []).map((t: any) => ({
+        id: t.id,
+        market: t.market || 'Inference',
+        marketIcon: t.marketIcon || 'brain',
+        amount: t.amount || 0,
+        status: t.status || 'completed',
+        details: t.details || '',
+      }));
+      all.sort((a, b) => b.amount - a.amount);
+      setTasks(all);
     } catch (e) {
       console.error('Failed to load completed tasks:', e);
     } finally {
       setLoading(false);
     }
-
-    all.sort((a, b) => b.amount - a.amount);
-    setTasks(all);
   }, []);
 
   useEffect(() => {
@@ -113,7 +88,7 @@ export default function CompletedTab() {
                 </div>
                 <div className="flex items-center gap-3">
                   <Badge variant="success">{t.status}</Badge>
-                  {t.amount > 0 && <span className="font-semibold text-green-400">{(t.amount / 1e9).toFixed(4)} CSPR</span>}
+                  {t.amount > 0 && <span className="font-semibold text-green-400">{t.amount.toFixed(4)}</span>}
                 </div>
               </div>
             ))}

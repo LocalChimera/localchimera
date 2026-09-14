@@ -1,7 +1,7 @@
 /**
  * Canonical task types used across the SDK, resource provisioner, and coordinator.
  *
- * Canonical space (Browser SDK / Casper / resource-provisioner):
+ * Canonical space (Browser SDK / resource-provisioner):
  *   0 = inference, 1 = storage, 2 = compute, 3 = bandwidth
  *
  * Botchain uses bit flags:

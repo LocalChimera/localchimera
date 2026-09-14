@@ -47,15 +47,15 @@ This document lists every remote API, RPC endpoint, and external service the Chi
 
 Payments for tasking resources (Golem compute, BTFS storage, etc.) are handled through the static frontend using the user's EVM wallet via Web3Auth. Request Network creates an on-chain payment request, and the protocol converts the received funds to the resource's native token off-chain.
 
-### 3.3 Casper Escrow Bridge
+### 3.3 Robinhood Chain Escrow Bridge
 
 | Endpoint | Protocol | Purpose | Auth |
 |----------|----------|---------|------|
-| `https://rpc.mainnet.casper.network/rpc` | JSON-RPC over HTTPS | Read provider account balance and submit smart-contract deploys for the Casper marketplace. | None (public RPC) |
+| `https://rpc.mainnet.chain.robinhood.com` | JSON-RPC over HTTPS | Read provider account balance and submit on-chain transactions for the escrow marketplace. | None (public RPC) |
 
 **Environment overrides:**
-- `CASPER_RPC_URL` — override RPC endpoint
-- `CASPER_CHAIN_NAME` — override chain name (`casper` or `casper-test`)
+- `CHIMERA_RPC_URL` — override RPC endpoint
+- `CHIMERA_CHAIN_NAME` — override chain name
 
 ### 3.4 GitHub (Installer Fetch)
 
@@ -114,7 +114,7 @@ No tasking-network installers are downloaded by Localchimera. The remaining mine
 |-----|-----------|----------------|
 | GitHub API (unauthenticated) | 60 req/hour | Cached in `sessionStorage` for 5 min |
 | Arbitrum public RPC | ~10 req/sec | 3 retries with 1s backoff in PayoutRouter |
-| Casper RPC | Varies by provider | No retry (deploy failures are logged) |
+| Robinhood Chain RPC | Varies by provider | No retry (transaction failures are logged) |
 
 ---
 

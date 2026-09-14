@@ -2,7 +2,6 @@ import { useState, useEffect, useCallback } from 'react';
 import { Search, X, Briefcase, Server, HardDrive, Zap, Radio, Cloud, Cpu, Box } from 'lucide-react';
 import { Button } from './ui';
 import ProviderMap from './ProviderMap';
-import { CONTRACTS, getContractNamedKeys, queryDictionary } from '../casper-client';
 
 type Provider = {
   id: string;
@@ -233,82 +232,24 @@ export default function ConsoleProviders() {
 
   const loadMachines = useCallback(async () => {
     setMachinesLoading(true);
-    const all: Provider[] = [];
     try {
-      const crKeys = await getContractNamedKeys(CONTRACTS.computeRegistry);
-      const providersListUref = crKeys['providers_list'];
-      const providersNameUref = crKeys['providers_name'];
-      const providersStatusUref = crKeys['providers_status'];
-      const providersGpuUref = crKeys['providers_gpu'];
-      const providersVramUref = crKeys['providers_vram'];
-      const providersCpuUref = crKeys['providers_cpu_cores'];
-      const providersRamUref = crKeys['providers_ram'];
-      const providersModelsUref = crKeys['providers_models'];
-      const providersCapacityUref = crKeys['providers_total_capacity_mb'];
-      const providersBandwidthUref = crKeys['providers_bandwidth_mbps'];
-      const providersServiceUref = crKeys['providers_service_type'];
-      const stakesUref = crKeys['stakes'];
-      if (providersListUref) {
-        const list = await queryDictionary(providersListUref, 'list');
-        const providerHashes: string[] = Array.isArray(list) ? list as string[] : [];
-        for (const ph of providerHashes) {
-          try {
-            const status = await queryDictionary(providersStatusUref, ph);
-            if (status === null || status === undefined) continue;
-            const name = String(await queryDictionary(providersNameUref, ph) || 'Unknown');
-            const gpu = await queryDictionary(providersGpuUref, ph);
-            const vram = String(await queryDictionary(providersVramUref, ph) || '0');
-            const cpu = String(await queryDictionary(providersCpuUref, ph) || '0');
-            const ram = String(await queryDictionary(providersRamUref, ph) || '0');
-            const models = String(await queryDictionary(providersModelsUref, ph) || '');
-            const capacity = String(await queryDictionary(providersCapacityUref, ph) || '0');
-            const bandwidth = String(await queryDictionary(providersBandwidthUref, ph) || '0');
-            const serviceType = String(await queryDictionary(providersServiceUref, ph) || '');
-            const stake = String(await queryDictionary(stakesUref, ph) || '0');
-            const stakeCSPR = (Number(stake) / 1e9).toFixed(2);
-            const isActive = String(status) === '1';
-
-            const specsParts: string[] = [];
-            if (models) specsParts.push(`Models: ${models.slice(0, 30)}`);
-            if (cpu !== '0') specsParts.push(`CPU: ${cpu} cores`);
-            if (ram !== '0') specsParts.push(`RAM: ${ram}MB`);
-            if (capacity !== '0') specsParts.push(`Storage: ${capacity}MB`);
-            if (bandwidth !== '0') specsParts.push(`Bandwidth: ${bandwidth}Mbps`);
-            specsParts.push(`GPU: ${Boolean(gpu)}`);
-            if (vram !== '0') specsParts.push(`VRAM: ${vram}MB`);
-            const specs = specsParts.join(' · ');
-
-            const resource = Boolean(gpu) ? 'GPU' : serviceType ? serviceType.charAt(0).toUpperCase() + serviceType.slice(1) : 'CPU';
-
-            all.push({
-              id: ph,
-              name,
-              resource,
-              specs,
-              status: isActive ? 'online' : 'offline',
-              source: 'First party',
-              attrs: [
-                { key: 'address', val: ph.slice(0, 20) + '...' },
-                { key: 'stake', val: stakeCSPR + ' CSPR' },
-                { key: 'models', val: models || '-' },
-                { key: 'gpu', val: Boolean(gpu) ? 'yes' : 'no' },
-                { key: 'vram_mb', val: vram },
-                { key: 'cpu_cores', val: cpu },
-                { key: 'ram_mb', val: ram },
-                { key: 'storage_mb', val: capacity },
-                { key: 'bandwidth_mbps', val: bandwidth },
-                { key: 'service_type', val: serviceType || '-' },
-              ],
-            });
-          } catch {}
-        }
-      }
+      const res = await fetch('/api/providers/first-party');
+      const data = await res.json().catch(() => ({}));
+      const all: Provider[] = (data.providers || []).map((p: any) => ({
+        id: p.id,
+        name: p.name || 'Unknown',
+        resource: p.resource || 'CPU',
+        specs: p.specs || '',
+        status: p.status || 'offline',
+        source: 'First party' as const,
+        attrs: p.attrs || [],
+      }));
+      setFirstPartyProviders(all);
     } catch (e) {
       console.error('Failed to load machines:', e);
     } finally {
       setMachinesLoading(false);
     }
-    setFirstPartyProviders(all);
   }, []);
 
   useEffect(() => {

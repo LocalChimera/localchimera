@@ -3,34 +3,17 @@ pragma solidity ^0.8.20;
 
 /**
  * @title ProofOfInferenceVerifier
- * @dev On-chain verification of Proof-of-Inference receipts produced by Chimera nodes.
+ * @dev On-chain verification of Proof-of-Inference receipts using OpenZeppelin ECDSA.
  *
- * Inspired by InferMart (on-chain USDT settlement) and Edge-AI-Nexus (verifiable inference).
- *
- * Each receipt contains:
- *   - merkleRoot: SHA-256 Merkle root of (promptHash, outputHash, modelId, timestamp, routeId)
- *   - signature: secp256k1 signature (r, s, recoveryId) over the merkleRoot
- *   - publicKey: secp256k1 public key (uncompressed, 65 bytes)
- *   - previousHash: SHA-256 of the previous receipt (tamper-evident chain)
- *   - chainIndex: sequential index in the chain
- *
- * Verification flow:
- *   1. Node submits a receipt to verifyInference()
- *   2. Contract recovers the public key from the signature using ecrecover
- *   3. Contract checks that the recovered address matches the registered node address
- *   4. Contract emits InferenceVerified event with the receipt data
- *   5. USDT settlement can be triggered based on verified receipts
- *
- * The contract also tracks the latest chain index per node to detect gaps.
+ * Uses OpenZeppelin ECDSA for signature recovery (MIT license).
  */
 
-interface IERC20 {
-    function transfer(address to, uint256 amount) external returns (bool);
-    function transferFrom(address from, address to, uint256 amount) external returns (bool);
-    function balanceOf(address account) external view returns (uint256);
-}
+import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+import "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
-contract ProofOfInferenceVerifier {
+contract ProofOfInferenceVerifier is Ownable {
     // Receipt structure (packed for gas efficiency)
     struct Receipt {
         bytes32 merkleRoot;
@@ -91,16 +74,9 @@ contract ProofOfInferenceVerifier {
 
     // Config
     uint256 public constant MAX_SETTLE_PER_TX = 100;
-    address public owner;
 
-    modifier onlyOwner() {
-        require(msg.sender == owner, "Not owner");
-        _;
-    }
-
-    constructor(address _usdt) {
+    constructor(address _usdt) Ownable(msg.sender) {
         usdt = IERC20(_usdt);
-        owner = msg.sender;
     }
 
     /**
@@ -136,13 +112,11 @@ contract ProofOfInferenceVerifier {
         require(!verifiedReceipts[receipt.merkleRoot], "Already verified");
         require(receipt.chainIndex == node.latestChainIndex + 1, "Chain index mismatch");
 
-        // Recover signer address from signature
-        // The signature is over the merkleRoot (no Ethereum prefix, raw secp256k1)
-        bytes32 ethSignedHash = receipt.merkleRoot; // No prefix for raw secp256k1
-        address recovered = ecrecover(ethSignedHash, receipt.recoveryId + 27, receipt.sigR, receipt.sigS);
+        // Recover signer address using OpenZeppelin ECDSA
+        bytes32 ethSignedHash = MessageHashUtils.toEthSignedMessageHash(receipt.merkleRoot);
+        address recovered = ECDSA.recover(ethSignedHash, receipt.recoveryId + 27, receipt.sigR, receipt.sigS);
 
         // Derive expected address from public key
-        // For uncompressed public key: take last 20 bytes of keccak256(pubKey[1:])
         bytes32 pubKeyAddrHash = keccak256(receipt.publicKey[1:]);
         address expectedAddr = address(uint160(uint256(pubKeyAddrHash)));
 

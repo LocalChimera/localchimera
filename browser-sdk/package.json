@@ -17,11 +17,6 @@
       "default": "./dist/browser-node.js",
       "types": "./dist/browser-node.d.ts"
     },
-    "./casper-client": {
-      "import": "./dist/casper-client.js",
-      "default": "./dist/casper-client.js",
-      "types": "./dist/casper-client.d.ts"
-    },
     "./network-adapters": {
       "import": "./dist/network-adapters.js",
       "default": "./dist/network-adapters.js",
@@ -59,7 +54,6 @@
     "node",
     "mining",
     "inference",
-    "casper",
     "webgpu",
     "ipfs",
     "wasi",
@@ -77,9 +71,7 @@
     "@web3auth/ethereum-provider": "^9.7.0",
     "@web3auth/modal": "^9.7.0",
     "@web3auth/mpc-core-kit": "^3.5.0",
-    "@web3auth/single-factor-auth": "^9.2.0",
-    "casper-js-sdk": "^5.0.12",
-    "ethers": "^6.17.0"
+    "@web3auth/single-factor-auth": "^9.2.0"
   },
   "peerDependencies": {
     "@helia/ipfs": ">=4.0.0",

@@ -1,14 +1,11 @@
 import { Logger } from '../core/Logger.js';
+import { CreateMLCEngine, preloadApp } from '@mlc-ai/web-llm';
 
 /**
- * QVACInferenceLayer — unified inference backend for miners and services.
+ * QVACInferenceLayer — unified inference backend using @mlc-ai/web-llm.
  *
- * Loads the official @qvac/sdk and serves inference requests from all
- * task networks (Casper, Botchain, BTT AI, Golem, etc.) as well as internal
- * services like the wiki AI writer.
- *
- * Shares the same QVAC runtime as LocalLLM so the entire node uses one
- * inference backend.
+ * Uses @mlc-ai/web-llm (Apache-2.0) for in-browser/Node LLM inference.
+ * Supports model hot-swapping with a small cache for multiple models.
  */
 export class QVACInferenceLayer {
   constructor(config, taskMonitor = null, audit = null) {
@@ -19,7 +16,6 @@ export class QVACInferenceLayer {
     this.activeRequests = new Map();
     this.lastActivity = Date.now();
     this.isRunning = false;
-    this.qvac = null;
     this.modelId = null;
     this._loading = null;
     this._activityTimer = null;
@@ -45,13 +41,6 @@ export class QVACInferenceLayer {
 
   async initialize() {
     this.logger.info('Initializing QVAC inference layer...');
-    try {
-      this.qvac = await import('@qvac/sdk');
-      this.logger.info('QVAC SDK loaded for inference layer.');
-    } catch (e) {
-      this.logger.warn(`QVAC SDK not available: ${e.message}`);
-      this.qvac = null;
-    }
     const qvacCfg = this.config?.qvac || {};
     this.logger.info(`Configured models: ${(qvacCfg.models || ['default']).join(', ')}`);
     this.logger.info(`Max concurrent requests: ${qvacCfg.maxConcurrent || 4}`);
@@ -103,38 +92,36 @@ export class QVACInferenceLayer {
 
   async _loadModel(targetModel) {
     if (this._loading) return this._loading;
-    if (!this.qvac) throw new Error('QVAC SDK not available');
 
     this._loading = (async () => {
-      const { loadModel, LLAMA_3_2_1B_INST_Q4_0 } = this.qvac;
-      const modelSrc = this.config.qvac.modelConst || LLAMA_3_2_1B_INST_Q4_0;
-      this.logger.info(`Loading QVAC model for inference layer: ${targetModel}`);
+      this.logger.info(`Loading model for inference layer: ${targetModel}`);
 
       // Hot-swap: unload previous model if we're at cache capacity
       if (this._modelCache.size >= this._maxCachedModels && this.modelId) {
-        const { unloadModel } = this.qvac;
         const oldModel = this._loadedModelName;
         this.logger.info(`Hot-swap: unloading ${oldModel} to make room for ${targetModel}`);
-        try { await unloadModel({ modelId: this.modelId }); } catch {}
+        try {
+          const oldEngine = this._modelCache.get(oldModel);
+          if (oldEngine?.unload) await oldEngine.unload();
+        } catch {}
         this._modelCache.delete(oldModel);
         if (this.audit) this.audit.modelUnload({ modelId: this.modelId, source: 'hot-swap' });
       }
 
-      const newModelId = await loadModel({
-        modelSrc,
-        modelType: 'llm',
-        modelConfig: { device: 'cpu' },
-        onProgress: (p) => {
-          if (p.percent % 10 === 0) this.logger.info(`Model load: ${p.percent}%`);
-        },
-      });
+      const engine = await CreateMLCEngine(
+        targetModel,
+        { initProgressCallback: (p) => {
+          if (Math.round((p.progress || 0) * 100) % 10 === 0)
+            this.logger.info(`Model load: ${Math.round((p.progress || 0) * 100)}%`);
+        }}
+      );
 
-      this.modelId = newModelId;
+      this.modelId = targetModel;
       this._loadedModelName = targetModel;
-      this._modelCache.set(targetModel, newModelId);
-      this.logger.info(`QVAC model ready: ${newModelId} (${targetModel})`);
-      if (this.audit) this.audit.modelLoad({ modelId: newModelId, durationMs: 0, source: 'inference-layer' });
-      return newModelId;
+      this._modelCache.set(targetModel, engine);
+      this.logger.info(`Model ready: ${targetModel}`);
+      if (this.audit) this.audit.modelLoad({ modelId: targetModel, durationMs: 0, source: 'inference-layer' });
+      return targetModel;
     })();
 
     try { await this._loading; } finally { this._loading = null; }
@@ -145,7 +132,6 @@ export class QVACInferenceLayer {
    * Explicitly switch to a different model (hot-swap).
    */
   async switchModel(modelName) {
-    if (!this.qvac) throw new Error('QVAC SDK not available');
     this.logger.info(`Hot-swap requested: ${this._loadedModelName} → ${modelName}`);
     return this._ensureModel(modelName);
   }
@@ -251,7 +237,7 @@ export class QVACInferenceLayer {
   async _executeInference(request, requestId) {
     let result;
     try {
-      if (this.qvac) {
+      if (this.modelId) {
         result = await this._runQVAC(request, requestId);
       } else {
         result = this._fallback(request, requestId);
@@ -264,8 +250,6 @@ export class QVACInferenceLayer {
   }
 
   async _runQVAC(request, requestId) {
-    const { completion } = this.qvac;
-
     const systemPrompt = request.systemPrompt || 'You are a helpful AI assistant.';
     const userPrompt = request.prompt || request.input || JSON.stringify(request);
 
@@ -300,27 +284,27 @@ export class QVACInferenceLayer {
     const requestedModel = request.model || null;
     const modelId = await this._ensureModel(requestedModel);
 
-    const gen = completion({
-      modelId,
-      history,
+    const engine = this._modelCache.get(this._loadedModelName);
+    if (!engine) throw new Error('No engine available');
+
+    const reply = await engine.chat.completions.create({
+      messages: history,
       stream: true,
-      generationParams: {
-        predict: request.maxTokens || 512,
-        temp: request.temperature || 0.7
-      }
+      max_tokens: request.maxTokens || 512,
+      temperature: request.temperature || 0.7,
     });
 
     let output = '';
     let ttftMs = 0;
     const inferenceStart = Date.now();
     let firstTokenTime = null;
-    for await (const token of gen.tokenStream) {
+    for await (const chunk of reply) {
       if (firstTokenTime === null) {
         firstTokenTime = Date.now();
         ttftMs = firstTokenTime - inferenceStart;
         this.logger.debug(`TTFT: ${ttftMs}ms for ${requestId}`);
       }
-      output += token;
+      output += chunk.choices[0]?.delta?.content || '';
     }
 
     const latency = Date.now() - (this.activeRequests.get(requestId)?.start || Date.now());
@@ -367,7 +351,7 @@ export class QVACInferenceLayer {
       maxConcurrent: this.config?.qvac?.maxConcurrent || 4,
       idle: this.isIdle(),
       lastActivity: this.lastActivity,
-      qvacAvailable: !!this.qvac,
+      qvacAvailable: !!this.modelId,
       modelLoaded: !!this.modelId,
       queue: this._queue?.getStats() || null,
       promptGuard: this._promptGuard?.getStats() || null,

@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
+import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/utils/Pausable.sol";
+
 /**
  * @title ChimeraBridgeDispatcher
  * @notice On-chain dispatcher that bridges funds via Li.Fi to pay tasking networks.
@@ -14,16 +17,10 @@ pragma solidity ^0.8.24;
  *      caller or by the coordinator's stored `bridgeData` per task type. The contract
  *      validates that the call succeeds and that the full `msg.value` is forwarded.
  */
-contract ChimeraBridgeDispatcher {
-    address public owner;
+contract ChimeraBridgeDispatcher is Ownable, Pausable {
     address public lifiDiamond;
 
-    // Allow the owner to pause dispatching in an emergency.
-    bool public paused;
-
-    event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
     event LifiDiamondUpdated(address indexed previousDiamond, address indexed newDiamond);
-    event PausedToggled(bool paused);
 
     event BridgeDispatched(
         bytes32 indexed jobId,
@@ -43,8 +40,7 @@ contract ChimeraBridgeDispatcher {
         string reason
     );
 
-    constructor(address _lifiDiamond) {
-        owner = msg.sender;
+    constructor(address _lifiDiamond) Ownable(msg.sender) {
         lifiDiamond = _lifiDiamond;
     }
 
@@ -108,14 +104,8 @@ contract ChimeraBridgeDispatcher {
     }
 
     function setPaused(bool _paused) external onlyOwner {
-        paused = _paused;
-        emit PausedToggled(paused);
-    }
-
-    function transferOwnership(address newOwner) external onlyOwner {
-        require(newOwner != address(0), "ChimeraBridgeDispatcher: new owner cannot be zero address");
-        emit OwnershipTransferred(owner, newOwner);
-        owner = newOwner;
+        if (_paused) _pause();
+        else _unpause();
     }
 
     function _getRevertReason(bytes memory returnData) internal pure returns (string memory) {
@@ -125,16 +115,6 @@ contract ChimeraBridgeDispatcher {
             returnData := add(returnData, 0x04)
         }
         return abi.decode(returnData, (string));
-    }
-
-    modifier onlyOwner() {
-        require(msg.sender == owner, "ChimeraBridgeDispatcher: only owner");
-        _;
-    }
-
-    modifier whenNotPaused() {
-        require(!paused, "ChimeraBridgeDispatcher: paused");
-        _;
     }
 
     receive() external payable {}

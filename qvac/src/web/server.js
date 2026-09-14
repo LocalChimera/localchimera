@@ -1,12 +1,13 @@
 import { Logger } from '../core/Logger.js';
-import { createServer } from 'http';
+import Fastify from 'fastify';
+import cors from '@fastify/cors';
 import { promises as fs, writeFileSync, mkdirSync, existsSync, readFileSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { spawn } from 'child_process';
 import { MarkdownIndexer } from '../llmwiki/MarkdownIndexer.js';
 import { NodeOrchestrator } from '../orchestrator/NodeOrchestrator.js';
-import { matchRoute, extractRouteParams } from './router.js';
+import { ROUTES, extractRouteParams } from './router.js';
 import { ok, accepted, badRequest, serverError, serviceUnavailable, parseBody } from './reply.js';
 import { extractBoundary, readBody, parseMultipart } from './multipart.js';
 import { repoToMarkdown } from './repoDigest.js';
@@ -156,35 +157,46 @@ Copy the topic hex and invite others to join.
   }
 
   async start() {
-    this.logger.info('Starting web server...');
-    
-    this.server = createServer(async (req, res) => {
-      // CORS — configurable via CORS_ORIGIN env var
-      const origin = req.headers['origin'];
-      if (this.corsOrigin === '*') {
-        res.setHeader('Access-Control-Allow-Origin', '*');
-      } else if (this.corsOrigin && origin === this.corsOrigin) {
-        res.setHeader('Access-Control-Allow-Origin', origin);
-        res.setHeader('Vary', 'Origin');
-      }
-      if (this.corsOrigin) {
-        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
-        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-      }
-      if (req.method === 'OPTIONS') {
-        res.writeHead(204);
-        res.end();
-        return;
-      }
-      await this.handleRequest(req, res);
+    this.logger.info('Starting web server (Fastify)...');
+
+    this.server = Fastify({
+      bodyLimit: 50 * 1024 * 1024,
+      requestTimeout: 600000,
+      keepAliveTimeout: 620000,
     });
 
-    // Increase server timeout for long AI generation (10 min)
-    this.server.timeout = 600000;
-    this.server.keepAliveTimeout = 620000;
-    
-    this.server.listen(this.port, () => {
-      this.logger.info(`Web server listening on port ${this.port}`);
+    await this.server.register(cors, {
+      origin: this.corsOrigin || true,
+      methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
+      allowedHeaders: ['Content-Type', 'Authorization'],
+    });
+
+    this._registerRoutes();
+
+    await this.server.listen({ port: this.port, host: '0.0.0.0' });
+    this.logger.info(`Web server listening on port ${this.port}`);
+  }
+
+  _registerRoutes() {
+    for (const [method, pathname, handlerName] of ROUTES) {
+      const fastifyMethod = method.toLowerCase();
+      this.server[fastifyMethod](pathname, async (request, reply) => {
+        const req = request.raw;
+        const res = reply.raw;
+        if (request.body !== undefined) req.body = request.body;
+        if (request.params) Object.assign(req, { params: request.params });
+        try {
+          await this[handlerName](req, res);
+        } catch (error) {
+          this.logger.error(`${handlerName} threw:`, error);
+          if (!res.headersSent) serverError(res, error);
+        }
+      });
+    }
+
+    this.server.get('*', async (request, reply) => {
+      const url = new URL(request.url, `http://${request.headers.host}`);
+      await this.serveStatic(reply.raw, url.pathname);
     });
   }
   
@@ -192,7 +204,7 @@ Copy the topic hex and invite others to join.
     this.logger.info('Stopping web server...');
     
     if (this.server) {
-      this.server.close();
+      await this.server.close();
     }
     
     this.logger.info('Web server stopped');
@@ -902,8 +914,8 @@ Copy the topic hex and invite others to join.
   /* ─── Orchestrator Handlers ─── */
 
   async handleCommanderRegister(req, res) {
-    const { workerUrl, evmAddress, casperProvider, capacity, inferenceUrl, inferenceReady, deviceFingerprint, deviceTrustScore } = await parseBody(req);
-    const result = this.orchestrator.registerWorker(workerUrl, { evmAddress, casperProvider, capacity, inferenceUrl, inferenceReady, deviceFingerprint, deviceTrustScore });
+    const { workerUrl, evmAddress, providerHash, capacity, inferenceUrl, inferenceReady, deviceFingerprint, deviceTrustScore } = await parseBody(req);
+    const result = this.orchestrator.registerWorker(workerUrl, { evmAddress, providerHash, capacity, inferenceUrl, inferenceReady, deviceFingerprint, deviceTrustScore });
     ok(res, result);
   }
 
@@ -1135,11 +1147,11 @@ Copy the topic hex and invite others to join.
 
       const miners = this.nodeManager.minerManager.miners;
 
-      // Propagate device fingerprint to CasperEscrowBridge for on-chain result verification
-      const casperMiner = miners.get('casper');
-      if (casperMiner && deviceFingerprint) {
-        casperMiner.deviceFingerprint = deviceFingerprint;
-        this.logger.info(`[fingerprint] Propagated to Casper escrow bridge`);
+      // Propagate device fingerprint to escrow bridge for on-chain result verification
+      const escrowMiner = miners.get('escrow');
+      if (escrowMiner && deviceFingerprint) {
+        escrowMiner.deviceFingerprint = deviceFingerprint;
+        this.logger.info(`[fingerprint] Propagated to escrow bridge`);
       }
 
       // Persist to config.json so the address survives restarts
@@ -1171,7 +1183,7 @@ Copy the topic hex and invite others to join.
 
     // ─── Auto-register this machine on the routing network ───
     // In privacy mode, skip orchestrator registration to avoid exposing host network identity
-    const providerHash = body.casperProvider || '';
+    const providerHash = body.providerHash || '';
     const evmAddr = machineOwner || appDev || '';
     let nodeUrl = '';
 
@@ -1183,7 +1195,7 @@ Copy the topic hex and invite others to join.
       nodeUrl = configPublicUrl || `${proto}://${host}`;
       this.orchestrator.registerWorker(nodeUrl, {
         evmAddress: evmAddr,
-        casperProvider: providerHash,
+        providerHash: providerHash,
         capacity: body.capacity || 1,
         inferenceUrl: `${nodeUrl}/v1/chat/completions`,
         inferenceReady: true,
@@ -1193,10 +1205,10 @@ Copy the topic hex and invite others to join.
       this.logger.info(`[router] Privacy mode — skipping orchestrator registration`);
     }
 
-    // ─── Auto-register provider on all Casper contracts ───
+    // ─── Auto-register provider on all Robinhood Chain contracts ───
     // In privacy mode, skip device profiling to avoid exposing hardware info
-    let casperResult = null;
-    if (this.nodeManager.casperRegistrar && !this._isPrivacyMode()) {
+    let registrationResult = null;
+    if (this.nodeManager.escrowRegistrar && !this._isPrivacyMode()) {
       try {
         const deviceProfile = {
           hasGpu: false,
@@ -1210,26 +1222,26 @@ Copy the topic hex and invite others to join.
           deviceFingerprint: deviceFingerprint,
           deviceTrustScore: deviceTrustScore,
         };
-        casperResult = await this.nodeManager.casperRegistrar.registerAll({
+        registrationResult = await this.nodeManager.escrowRegistrar.registerAll({
           peerId: this.config?.node?.id || 'chimera-node',
           nodeName: this.config?.node?.name || 'Chimera Node',
           deviceProfile,
         });
-        this.logger.info(`[casper] Auto-registration result: ${casperResult.registered.length} contracts, ${casperResult.errors.length} errors`);
+        this.logger.info(`[registration] Auto-registration result: ${registrationResult.registered.length} contracts, ${registrationResult.errors.length} errors`);
       } catch (e) {
-        this.logger.warn(`[casper] Auto-registration failed: ${e.message}`);
-        casperResult = { registered: [], errors: [e.message] };
+        this.logger.warn(`[registration] Auto-registration failed: ${e.message}`);
+        registrationResult = { registered: [], errors: [e.message] };
       }
-    } else if (this.nodeManager.casperRegistrar && this._isPrivacyMode()) {
-      this.logger.info(`[casper] Privacy mode — skipping device profiling and contract registration`);
+    } else if (this.nodeManager.escrowRegistrar && this._isPrivacyMode()) {
+      this.logger.info(`[registration] Privacy mode — skipping device profiling and contract registration`);
     }
 
     const registeredInfo = this._isPrivacyMode()
       ? { privacyMode: true, evmAddress: this._maskEVM(evmAddr) }
-      : { url: nodeUrl, evmAddress: evmAddr, casperProvider: providerHash };
+      : { url: nodeUrl, evmAddress: evmAddr, providerHash: providerHash };
 
     ok(res, {
-      message: 'Mining started', running: true, registered: registeredInfo, casper: casperResult,
+      message: 'Mining started', running: true, registered: registeredInfo, registration: registrationResult,
       privacyMode: this._isPrivacyMode(),
       deviceFingerprint: deviceFingerprint ? { hash: deviceFingerprint.slice(0, 16) + '...', trustScore: Math.round(deviceTrustScore * 100) / 100 } : null,
     });
@@ -1247,11 +1259,11 @@ Copy the topic hex and invite others to join.
     ok(res, { message: 'Mining stopped', running: false });
   }
 
-  async handleCasperStatus(req, res) {
+  async handleEscrowStatus(req, res) {
     if (!this.nodeManager?.minerManager) { serviceUnavailable(res, 'Miner manager not available'); return; }
-    const casper = this.nodeManager.minerManager.miners.get('casper');
-    if (!casper) { ok(res, { available: false, reason: 'Casper miner not configured' }); return; }
-    ok(res, { available: true, ...casper.getStatus() });
+    const escrow = this.nodeManager.minerManager.miners.get('escrow');
+    if (!escrow) { ok(res, { available: false, reason: 'Escrow miner not configured' }); return; }
+    ok(res, { available: true, ...escrow.getStatus() });
   }
 
   async handleMinerTest(req, res) {
@@ -3066,7 +3078,7 @@ Copy the topic hex and invite others to join.
   async handleMarketInference(req, res) {
     try {
       const body = await parseBody(req);
-      if (!body.private_key_pem && !body.key_pem_path) return badRequest(res, 'Missing private_key_pem or key_pem_path — a funded Casper account key is required');
+      if (!body.private_key_pem && !body.key_pem_path) return badRequest(res, 'Missing private_key_pem or key_pem_path — a funded account key is required');
       if (!body.prompt) return badRequest(res, 'Missing prompt');
       
       const result = await marketApi.createInferenceJob({
@@ -3081,7 +3093,7 @@ Copy the topic hex and invite others to join.
   async handleMarketStorageAllocate(req, res) {
     try {
       const body = await parseBody(req);
-      if (!body.private_key_pem && !body.key_pem_path) return badRequest(res, 'Missing private_key_pem or key_pem_path — a funded Casper account key is required');
+      if (!body.private_key_pem && !body.key_pem_path) return badRequest(res, 'Missing private_key_pem or key_pem_path — a funded account key is required');
       if (!body.space_name) return badRequest(res, 'Missing space_name');
       
       const result = await marketApi.createStorageAllocation({
@@ -3097,7 +3109,7 @@ Copy the topic hex and invite others to join.
   async handleMarketStorageStore(req, res) {
     try {
       const body = await parseBody(req);
-      if (!body.private_key_pem && !body.key_pem_path) return badRequest(res, 'Missing private_key_pem or key_pem_path — a funded Casper account key is required');
+      if (!body.private_key_pem && !body.key_pem_path) return badRequest(res, 'Missing private_key_pem or key_pem_path — a funded account key is required');
       if (!body.space_name) return badRequest(res, 'Missing space_name');
       if (!body.file_hash) return badRequest(res, 'Missing file_hash');
       
@@ -3120,7 +3132,7 @@ Copy the topic hex and invite others to join.
   async handleMarketStorageRetrieve(req, res) {
     try {
       const body = await parseBody(req);
-      if (!body.private_key_pem && !body.key_pem_path) return badRequest(res, 'Missing private_key_pem or key_pem_path — a funded Casper account key is required');
+      if (!body.private_key_pem && !body.key_pem_path) return badRequest(res, 'Missing private_key_pem or key_pem_path — a funded account key is required');
       if (!body.space_name) return badRequest(res, 'Missing space_name');
       if (!body.file_hash) return badRequest(res, 'Missing file_hash');
       
@@ -3137,7 +3149,7 @@ Copy the topic hex and invite others to join.
   async handleMarketCompute(req, res) {
     try {
       const body = await parseBody(req);
-      if (!body.private_key_pem && !body.key_pem_path) return badRequest(res, 'Missing private_key_pem or key_pem_path — a funded Casper account key is required');
+      if (!body.private_key_pem && !body.key_pem_path) return badRequest(res, 'Missing private_key_pem or key_pem_path — a funded account key is required');
       if (!body.code) return badRequest(res, 'Missing code');
       
       const result = await marketApi.createComputeJob({
@@ -3157,7 +3169,7 @@ Copy the topic hex and invite others to join.
   async handleMarketBandwidth(req, res) {
     try {
       const body = await parseBody(req);
-      if (!body.private_key_pem && !body.key_pem_path) return badRequest(res, 'Missing private_key_pem or key_pem_path — a funded Casper account key is required');
+      if (!body.private_key_pem && !body.key_pem_path) return badRequest(res, 'Missing private_key_pem or key_pem_path — a funded account key is required');
       
       const result = await marketApi.createBandwidthJob({
         privateKeyPem: body.private_key_pem || body.key_pem_path,
@@ -3194,9 +3206,9 @@ Copy the topic hex and invite others to join.
   async handleMarketDocs(req, res) {
     ok(res, {
       title: 'Chimera Market API',
-      description: 'Programmatic API for requesting compute resources on the Casper testnet',
+      description: 'Programmatic API for requesting compute resources on Robinhood Chain',
       base_url: '/api/market',
-      authentication: 'All POST endpoints require a Casper private key (PEM string or file path) from a funded account to sign transactions',
+      authentication: 'All POST endpoints require an EVM private key (PEM string or file path) from a funded account to sign transactions',
       endpoints: {
         inference: {
           method: 'POST',

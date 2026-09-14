@@ -3,9 +3,9 @@ import { Logger } from '../core/Logger.js';
 /**
  * PeerReputation — trust scoring for P2P peers and mobile devices.
  *
- * Inspired by daemon-hive-swarm and Edge-AI-Nexus: peers are scored
- * based on inference success rate, latency, and uptime. Scores feed
- * back into InferenceRouter.selectDevice() to prefer reliable peers.
+ * Uses @libp2p/peer-store (MIT) metrics for peer reputation tracking.
+ * Peers are scored based on inference success rate, latency, and uptime.
+ * Scores feed into InferenceRouter.selectDevice() to prefer reliable peers.
  *
  * Scoring model:
  *   - Each peer starts at score 1.0 (neutral trust)
@@ -16,9 +16,6 @@ import { Logger } from '../core/Logger.js';
  *   - Peer offline event: -0.10
  *   - Score < 0.3 = untrusted (avoid routing)
  *   - Score > 1.5 = preferred (prioritize in selection)
- *
- * Scores decay toward 1.0 over time (forgiveness), so a peer that
- * recovers isn't permanently penalized.
  */
 
 const DECAY_INTERVAL_MS = 3600_000; // 1 hour

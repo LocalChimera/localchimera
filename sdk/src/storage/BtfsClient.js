@@ -4,7 +4,7 @@
  * Talks to a local go-btfs daemon at the standard API port (5001).
  * This client only performs storage/retrieval operations (add, cat, pin, unpin).
  * It does NOT interact with the BTT wallet, storage-host contracts, or cheques.
- * All payments and job authorization live on the Casper blockchain.
+ * All payments and job authorization live on the Robinhood Chain.
  */
 
 export class BtfsClient {

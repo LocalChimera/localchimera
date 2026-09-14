@@ -1,9 +1,4 @@
-[submodule "upstream/repo-to-markdown"]
-	path = upstream/repo-to-markdown
-	url = https://github.com/puter-apps/repo-to-markdown.git
-[submodule "upstream/markitdown"]
-	path = upstream/markitdown
-	url = https://github.com/microsoft/markitdown.git
+# Wiki / Knowledge Base submodules — KEPT for notetaking app
 [submodule "upstream/llmwiki"]
 	path = upstream/llmwiki
 	url = https://github.com/lucasastorian/llmwiki.git
@@ -16,18 +11,8 @@
 [submodule "upstream/knowledge-catalog"]
 	path = upstream/knowledge-catalog
 	url = https://github.com/GoogleCloudPlatform/knowledge-catalog.git
-[submodule "upstream/concrete"]
-	path = upstream/concrete
-	url = https://github.com/zama-ai/concrete.git
 
-# Tasking / mining network forks — run scripts/fork-upstream.sh to repoint to your GitHub forks
-# Only networks that are safe on untrusted hardware are kept.
-[submodule "upstream/chutes-miner"]
-	path = upstream/chutes-miner
-	url = https://github.com/chutesai/chutes-miner.git
-[submodule "upstream/routstr-core"]
-	path = upstream/routstr-core
-	url = https://github.com/routstr/routstr-core.git
+# Tasking / mining network forks — KEPT
 [submodule "upstream/btt-ai-miner"]
 	path = upstream/btt-ai-miner
 	url = https://github.com/BTT-AI-labs/miner-cli.git
@@ -43,36 +28,8 @@
 [submodule "upstream/btfs"]
 	path = upstream/btfs
 	url = https://github.com/bittorrent/go-btfs.git
-[submodule "upstream/fhevm"]
-	path = upstream/fhevm
-	url = https://github.com/zama-ai/fhevm.git
+
+# Foundry lib
 [submodule "lib/forge-std"]
 	path = lib/forge-std
 	url = https://github.com/foundry-rs/forge-std
-[submodule "upstream/concrete-ml"]
-	path = upstream/concrete-ml
-	url = https://github.com/zama-ai/concrete-ml.git
-[submodule "website/inference-frontend/third-party/refref"]
-	path = website/inference-frontend/third-party/refref
-	url = https://github.com/amicalhq/refref
-[submodule "website/inference-frontend/third-party/fossbilling"]
-	path = website/inference-frontend/third-party/fossbilling
-	url = https://github.com/FOSSBilling/FOSSBilling
-[submodule "website/inference-frontend/third-party/bitcart"]
-	path = website/inference-frontend/third-party/bitcart
-	url = https://github.com/bitcart/bitcart
-[submodule "website/inference-frontend/third-party/shkeeper"]
-	path = website/inference-frontend/third-party/shkeeper
-	url = https://github.com/vsys-host/shkeeper.io
-[submodule "website/inference-frontend/third-party/bitcart-docker"]
-	path = website/inference-frontend/third-party/bitcart-docker
-	url = https://github.com/bitcart/bitcart-docker
-[submodule "website/inference-frontend/third-party/requestfinance-demo"]
-	path = website/inference-frontend/third-party/requestfinance-demo
-	url = https://github.com/RequestFinance/demo-api
-[submodule "website/inference-frontend/third-party/requestnetwork"]
-	path = website/inference-frontend/third-party/requestnetwork
-	url = https://github.com/RequestNetwork/requestNetwork
-[submodule "upstream/vitepress"]
-	path = upstream/vitepress
-	url = https://github.com/vuejs/vitepress.git

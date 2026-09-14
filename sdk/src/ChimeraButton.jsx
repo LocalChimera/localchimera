@@ -2,7 +2,7 @@
  * ChimeraButton — One-line integration for Chimera SDK.
  *
  * Just drop <ChimeraButton /> anywhere in your app. It handles:
- *   - Wallet connection (EVM via ConnectKit, Solana via Solana Wallet Adapter, Casper via Casper Wallet)
+ *   - Wallet connection (EVM via ConnectKit, Solana via Solana Wallet Adapter)
  *   - Message signing and backend JWT verification for EVM/Solana
  *   - Web3Auth MPC wallet creation for EVM/Solana
  *   - User consent flow

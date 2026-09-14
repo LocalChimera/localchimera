@@ -1,7 +1,7 @@
 {
   "name": "@localchimera/resource-provisioner",
   "version": "1.0.0",
-  "description": "Worker that converts Request Network payments into tasking-network resources",
+  "description": "Cloudflare Worker that receives onchain escrow payments (Chimera EscrowChannel.sol with ERC-8184 vouchers) and calls external payer APIs directly",
   "main": "src/index.js",
   "type": "module",
   "scripts": {
@@ -11,30 +11,27 @@
     "test": "echo 'no tests yet' && exit 0"
   },
   "dependencies": {
-    "@requestnetwork/request-client.js": "^0.58.0",
-    "@requestnetwork/payment-detection": "^0.53.0",
-    "@requestnetwork/epk-signature": "^0.9.9",
     "@golem-sdk/golem-js": "^3.0.0",
-    "ethers": "^5.7.2",
+    "viem": "^2.21.0",
     "node-fetch": "^3.3.2",
     "dotenv": "^16.4.0",
     "ws": "^8.18.0"
   },
-  "optionalDependencies": {
-    "casper-js-sdk": "^5.0.0"
-  },
   "keywords": [
     "chimera",
     "resource-provisioner",
-    "request-network",
+    "erc-8184",
+    "x402",
     "lifi",
     "golem",
+    "spheron",
     "btfs",
+    "crust",
     "mysterium",
+    "sentinel",
+    "infernet",
     "edge-network",
-    "streamr",
-    "ceramic",
-    "namesilo"
+    "streamr"
   ],
   "license": "MIT"
 }

@@ -1,28 +1,19 @@
 import crypto from 'crypto';
 import { Logger } from '../core/Logger.js';
+import _sodium from 'libsodium-wrappers';
 
 /**
  * CryptoVault — per-workspace encryption for sensitive RAG documents.
  *
- * Inspired by Qvault: each workspace gets its own derived encryption key.
- * Documents are encrypted at rest (AES-256-GCM) before being stored in
- * HypercoreStore, and decrypted on read. Keys are derived from a master
- * key + workspace name using HKDF, so only the node holding the master
- * key can decrypt.
- *
- * This module wraps the storage layer — it sits between the embedding
- * service and HypercoreStore, transparently encrypting/decrypting
- * documents by workspace.
+ * Uses libsodium-wrappers (MIT/ISC) for AEAD encryption (XChaCha20-Poly1305).
+ * Each workspace gets its own derived encryption key. Documents are encrypted
+ * at rest before being stored in HypercoreStore, and decrypted on read.
  *
  * Key hierarchy:
  *   masterKey (node secret, 32 bytes)
  *     └── workspaceKey = HKDF(masterKey, workspaceName)
- *           └── per-document: AES-256-GCM(workspaceKey, nonce, plaintext)
+ *           └── per-document: XChaCha20-Poly1305(workspaceKey, nonce, plaintext)
  */
-
-const ALGORITHM = 'aes-256-gcm';
-const NONCE_LENGTH = 12;
-const TAG_LENGTH = 16;
 
 export class CryptoVault {
   constructor(config = {}) {
@@ -30,10 +21,17 @@ export class CryptoVault {
     this.enabled = config.enabled !== false;
     this._masterKey = config.masterKey
       ? Buffer.from(config.masterKey, 'hex')
-      : crypto.randomBytes(32);
+      : Buffer.from(crypto.randomBytes(32));
     this._workspaceKeys = new Map();
     this._encryptedCount = 0;
     this._decryptedCount = 0;
+    this._sodium = null;
+    this._initSodium();
+  }
+
+  async _initSodium() {
+    await _sodium.ready;
+    this._sodium = _sodium;
   }
 
   /**
@@ -51,51 +49,65 @@ export class CryptoVault {
   }
 
   /**
-   * Encrypt a document for a workspace.
+   * Encrypt a document for a workspace using XChaCha20-Poly1305.
    * Returns { encrypted, nonce, tag } as hex strings.
    */
   encrypt(workspace, plaintext) {
     if (!this.enabled) return { data: plaintext, encrypted: false };
+    if (!this._sodium) return this._encryptFallback(workspace, plaintext);
 
     const key = this._getWorkspaceKey(workspace);
-    const nonce = crypto.randomBytes(NONCE_LENGTH);
-    const cipher = crypto.createCipheriv(ALGORITHM, key, nonce);
-
-    const encrypted = Buffer.concat([
-      cipher.update(plaintext, 'utf-8'),
-      cipher.final(),
-    ]);
-    const tag = cipher.getAuthTag();
+    const nonce = this._sodium.randombytes_buf(this._sodium.crypto_aead_xchacha20poly1305_ietf_NPUBBYTES);
+    const message = this._sodium.from_string(plaintext);
+    const ciphertext = this._sodium.crypto_aead_xchacha20poly1305_ietf_encrypt(message, null, null, nonce, key);
 
     this._encryptedCount++;
     return {
-      data: encrypted.toString('hex'),
-      nonce: nonce.toString('hex'),
-      tag: tag.toString('hex'),
+      data: this._sodium.to_hex(ciphertext),
+      nonce: this._sodium.to_hex(nonce),
+      tag: '',
       encrypted: true,
     };
   }
 
   /**
-   * Decrypt a document from a workspace.
+   * Decrypt a document from a workspace using XChaCha20-Poly1305.
    * Returns the plaintext string.
    */
   decrypt(workspace, { data, nonce, tag }) {
-    if (!this.enabled || !nonce || !tag) return data;
+    if (!this.enabled || !nonce) return data;
+    if (!this._sodium) return this._decryptFallback(workspace, { data, nonce, tag });
 
     const key = this._getWorkspaceKey(workspace);
-    const decipher = crypto.createDecipheriv(
-      ALGORITHM,
-      key,
-      Buffer.from(nonce, 'hex')
-    );
+    const nonceBytes = this._sodium.from_hex(nonce);
+    const ciphertext = this._sodium.from_hex(data);
+    const decrypted = this._sodium.crypto_aead_xchacha20poly1305_ietf_decrypt(null, ciphertext, null, nonceBytes, key);
+
+    this._decryptedCount++;
+    return this._sodium.to_string(decrypted);
+  }
+
+  /**
+   * Fallback encryption using Node crypto AES-256-GCM if sodium not ready.
+   */
+  _encryptFallback(workspace, plaintext) {
+    const key = this._getWorkspaceKey(workspace);
+    const nonce = crypto.randomBytes(12);
+    const cipher = crypto.createCipheriv('aes-256-gcm', key, nonce);
+    const encrypted = Buffer.concat([cipher.update(plaintext, 'utf-8'), cipher.final()]);
+    const tag = cipher.getAuthTag();
+    this._encryptedCount++;
+    return { data: encrypted.toString('hex'), nonce: nonce.toString('hex'), tag: tag.toString('hex'), encrypted: true };
+  }
+
+  /**
+   * Fallback decryption using Node crypto AES-256-GCM.
+   */
+  _decryptFallback(workspace, { data, nonce, tag }) {
+    const key = this._getWorkspaceKey(workspace);
+    const decipher = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(nonce, 'hex'));
     decipher.setAuthTag(Buffer.from(tag, 'hex'));
-
-    const decrypted = Buffer.concat([
-      decipher.update(Buffer.from(data, 'hex')),
-      decipher.final(),
-    ]);
-
+    const decrypted = Buffer.concat([decipher.update(Buffer.from(data, 'hex')), decipher.final()]);
     this._decryptedCount++;
     return decrypted.toString('utf-8');
   }
@@ -177,7 +189,7 @@ export class CryptoVault {
       cachedWorkspaceKeys: this._workspaceKeys.size,
       totalEncrypted: this._encryptedCount,
       totalDecrypted: this._decryptedCount,
-      algorithm: ALGORITHM,
+      algorithm: 'XChaCha20-Poly1305',
     };
   }
 }

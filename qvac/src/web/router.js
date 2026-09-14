@@ -51,7 +51,7 @@ export const ROUTES = [
   ['POST', '/api/start',              'handleStart'],
   ['POST', '/api/stop',               'handleStop'],
   ['POST', '/api/miner-test',         'handleMinerTest'],
-  ['GET',  '/api/casper/status',      'handleCasperStatus'],
+  ['GET',  '/api/escrow/status',      'handleEscrowStatus'],
   // Device Attestation (browser-based fingerprinting from new.localchimera.com)
   ['POST', '/api/attest-device',      'handleAttestDevice'],
   // Remote Fingerprinting — loads code from new.localchimera.com, runs in VM sandbox

@@ -136,18 +136,18 @@ interface AutomationCompatibleInterface {
 
 /**
  * @title ChimeraCoordinator
- * @dev On-chain job router for the Botchain escrow.
+ * @dev On-chain job router for the Chimera escrow using OpenZeppelin AccessControl.
  *
  * Users call createJob() on this contract instead of the EscrowVault directly.
  * The coordinator reads the ComputeRegistry, selects an active provider that supports
  * the requested task type, and creates the escrow job with that provider pre-assigned.
  * A JobRouted event is emitted so the assigned provider can listen and execute.
- *
- * This removes the need for a central WebSocket coordinator server. Volunteers
- * simply listen to JobRouted events and submit results on-chain.
  */
-contract ChimeraCoordinator is AutomationCompatibleInterface {
-    address public owner;
+
+import "@openzeppelin/contracts/access/AccessControl.sol";
+
+contract ChimeraCoordinator is AccessControl, AutomationCompatibleInterface {
+    bytes32 public constant COORDINATOR_ROLE = keccak256("COORDINATOR_ROLE");
     IEscrowVault public escrow;
     IComputeRegistry public registry;
 
@@ -247,33 +247,34 @@ contract ChimeraCoordinator is AutomationCompatibleInterface {
     );
 
     constructor(address _escrow, address _registry) {
-        owner = msg.sender;
+        _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
+        _grantRole(COORDINATOR_ROLE, msg.sender);
         escrow = IEscrowVault(_escrow);
         registry = IComputeRegistry(_registry);
     }
 
-    modifier onlyOwner() {
-        require(msg.sender == owner, "ChimeraCoordinator: not owner");
+    modifier onlyCoordinator() {
+        require(hasRole(COORDINATOR_ROLE, msg.sender), "ChimeraCoordinator: not coordinator");
         _;
     }
 
-    function setEscrow(address _escrow) external onlyOwner {
+    function setEscrow(address _escrow) external onlyCoordinator {
         address previous = address(escrow);
         escrow = IEscrowVault(_escrow);
         emit EscrowUpdated(previous, _escrow);
     }
 
-    function setRegistry(address _registry) external onlyOwner {
+    function setRegistry(address _registry) external onlyCoordinator {
         address previous = address(registry);
         registry = IComputeRegistry(_registry);
         emit RegistryUpdated(previous, _registry);
     }
 
-    function transferOwnership(address newOwner) external onlyOwner {
+    function transferOwnership(address newOwner) external onlyCoordinator {
         require(newOwner != address(0), "ChimeraCoordinator: zero address");
-        address previous = owner;
-        owner = newOwner;
-        emit OwnershipTransferred(previous, newOwner);
+        _grantRole(DEFAULT_ADMIN_ROLE, newOwner);
+        _grantRole(COORDINATOR_ROLE, newOwner);
+        emit OwnershipTransferred(msg.sender, newOwner);
     }
 
     /**
@@ -429,7 +430,7 @@ contract ChimeraCoordinator is AutomationCompatibleInterface {
         _bridge(jobAddress, policy, bridgeAmount);
     }
 
-    function setFallbackTimeout(uint256 newTimeout) external onlyOwner {
+    function setFallbackTimeout(uint256 newTimeout) external onlyCoordinator {
         fallbackTimeout = newTimeout;
     }
 
@@ -467,7 +468,7 @@ contract ChimeraCoordinator is AutomationCompatibleInterface {
         emit JobPaid(jobIds[jobAddress], jobAddress, msg.sender, responseHash, amount);
     }
 
-    function setBridgeDispatcher(address _bridgeDispatcher) external onlyOwner {
+    function setBridgeDispatcher(address _bridgeDispatcher) external onlyCoordinator {
         require(_bridgeDispatcher != address(0), "ChimeraCoordinator: bridge dispatcher cannot be zero address");
         emit BridgeDispatcherUpdated(address(bridgeDispatcher), _bridgeDispatcher);
         bridgeDispatcher = IBridgeDispatcher(_bridgeDispatcher);
@@ -478,7 +479,7 @@ contract ChimeraCoordinator is AutomationCompatibleInterface {
         address receiver,
         uint256 destinationChainId,
         bytes calldata lifiCallData
-    ) external onlyOwner {
+    ) external onlyCoordinator {
         require(receiver != address(0), "ChimeraCoordinator: bridge receiver cannot be zero address");
         require(destinationChainId > 0, "ChimeraCoordinator: bridge destination chain must be set");
         require(lifiCallData.length > 0, "ChimeraCoordinator: bridge calldata cannot be empty");
@@ -493,7 +494,7 @@ contract ChimeraCoordinator is AutomationCompatibleInterface {
         address receiver,
         uint256 destinationChainId,
         bytes calldata lifiCallData
-    ) external onlyOwner {
+    ) external onlyCoordinator {
         require(receiver != address(0), "ChimeraCoordinator: refund receiver cannot be zero address");
         require(destinationChainId > 0, "ChimeraCoordinator: refund destination chain must be set");
         require(lifiCallData.length > 0, "ChimeraCoordinator: refund calldata cannot be empty");
@@ -503,7 +504,7 @@ contract ChimeraCoordinator is AutomationCompatibleInterface {
         emit RefundBridgeDataUpdated(taskType, receiver, destinationChainId);
     }
 
-    function setRefundTimeout(uint256 newTimeout) external onlyOwner {
+    function setRefundTimeout(uint256 newTimeout) external onlyCoordinator {
         refundTimeout = newTimeout;
     }
 
@@ -512,7 +513,7 @@ contract ChimeraCoordinator is AutomationCompatibleInterface {
      *         to mark a bridged job as completed by the tasking network. This prevents an automatic refund.
      * @param completionHash A hash representing the tasking-network result (optional, can be 0).
      */
-    function markFallbackComplete(address jobAddress, bytes32 completionHash) external onlyOwner {
+    function markFallbackComplete(address jobAddress, bytes32 completionHash) external onlyCoordinator {
         require(bridged[jobAddress], "ChimeraCoordinator: job not yet bridged");
         require(!refunded[jobAddress], "ChimeraCoordinator: job already refunded");
         fallbackCompleted[jobAddress] = true;

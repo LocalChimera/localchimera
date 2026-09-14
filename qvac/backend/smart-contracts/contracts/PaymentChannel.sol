@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
+import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+import "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
+
 interface IPaymentChannel {
     enum ChannelStatus { Open, Closing, Closed }
 
@@ -42,17 +46,13 @@ interface IPaymentChannel {
     function usedVouchers(bytes32 voucherHash) external view returns (bool);
 }
 
-contract PaymentChannel is IPaymentChannel {
+contract PaymentChannel is IPaymentChannel, Ownable {
     uint256 public constant CHALLENGE_PERIOD = 1 days;
-
-    address public owner;
 
     mapping(bytes32 => Channel) public channels;
     mapping(bytes32 => bool) public usedVouchers;
 
-    constructor() {
-        owner = msg.sender;
-    }
+    constructor() Ownable(msg.sender) {}
 
     receive() external payable {}
 
@@ -86,7 +86,7 @@ contract PaymentChannel is IPaymentChannel {
         bytes32 voucherHash = keccak256(abi.encodePacked(channelId, amount, nonce));
         if (usedVouchers[voucherHash]) revert InvalidVoucher();
 
-        address signer = recoverSigner(voucherHash, signature);
+        address signer = ECDSA.recover(MessageHashUtils.toEthSignedMessageHash(voucherHash), signature);
         if (signer != channel.sender) revert InvalidSender();
 
         usedVouchers[voucherHash] = true;
@@ -125,19 +125,4 @@ contract PaymentChannel is IPaymentChannel {
         emit ChannelClosed(channelId, remaining, channel.withdrawn);
     }
 
-    function recoverSigner(bytes32 messageHash, bytes memory signature) internal pure returns (address) {
-        if (signature.length != 65) revert InvalidVoucher();
-
-        bytes32 r;
-        bytes32 s;
-        uint8 v;
-
-        assembly {
-            r := mload(add(signature, 32))
-            s := mload(add(signature, 64))
-            v := byte(0, mload(add(signature, 96)))
-        }
-
-        return ecrecover(messageHash, v, r, s);
-    }
 }

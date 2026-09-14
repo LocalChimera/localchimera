@@ -1,38 +1,31 @@
 import { useState, useCallback, useEffect } from 'react';
 import { useWeb3Auth } from './web3auth';
-import { connectWallet, disconnectWallet, isWalletInstalled } from './casper-wallet';
-import { switchToBotchain, switchToEthereum, BOTCHAIN_TESTNET } from './botchain';
-import { Wallet, LayoutGrid, Home, Server, Rocket, Briefcase, CircleDollarSign, HardDrive, Star, Activity, CheckCircle, Sun, Moon, Globe, Plus } from 'lucide-react';
+import { Wallet, LayoutGrid, Server, Rocket, Briefcase, CircleDollarSign, Star, Activity, CheckCircle, Sun, Moon, Globe, Plus, BarChart } from 'lucide-react';
 import { Button } from './components/ui';
 import MarketTab from './components/MarketTab';
 import CompletedTab from './components/CompletedTab';
-import TaskerTab from './components/TaskerTab';
-// ProviderNetworkTab merged into ConsoleProviders
 import ReferralsTab from './components/ReferralsTab';
 import BillingTab from './components/BillingTab';
 import ConsoleDeploy from './components/ConsoleDeploy';
 import ConsoleProviders from './components/ConsoleProviders';
 import ConsoleEarnings from './components/ConsoleEarnings';
-import BotchainTab from './components/BotchainTab';
 import DomainRegistration from './components/DomainRegistration';
 import { getDeployments, closeDeployment, type Deployment } from './lib/deployments';
 import type { TxRecord } from './types';
 
-type Page = 'home' | 'console-deploy' | 'console-providers' | 'earnings' | 'market' | 'completed' | 'tasker-manage' | 'tasker-confirm' | 'tasker-disputes' | 'referrals' | 'billing' | 'domains';
+type Page = 'home' | 'console-deploy' | 'console-providers' | 'earnings' | 'market' | 'completed' | 'referrals' | 'billing' | 'domains';
 
-const navItems: { id: Page | string; label: string; icon: React.ReactNode; href?: string; external?: boolean; group?: string }[] = [
-  { id: 'home', label: 'Console', icon: <LayoutGrid className="h-[18px] w-[18px]" />, group: 'Console' },
-  { id: 'domains', label: 'Domains', icon: <Globe className="h-[18px] w-[18px]" />, group: 'Console' },
-  { id: 'console-deploy', label: 'Deploy', icon: <Rocket className="h-[18px] w-[18px]" />, group: 'Console' },
-  { id: 'tasker-manage', label: 'Manage', icon: <HardDrive className="h-[18px] w-[18px]" />, group: 'Console' },
-  { id: 'tasker-confirm', label: 'Confirm & Rate', icon: <CheckCircle className="h-[18px] w-[18px]" />, group: 'Console' },
-  { id: 'tasker-disputes', label: 'Disputes', icon: <Activity className="h-[18px] w-[18px]" />, group: 'Console' },
-  { id: 'console-providers', label: 'Providers', icon: <Briefcase className="h-[18px] w-[18px]" />, group: 'Console' },
-  { id: 'earnings', label: 'Earnings', icon: <CircleDollarSign className="h-[18px] w-[18px]" />, group: 'Console' },
-  { id: 'market', label: 'Market', icon: <Activity className="h-[18px] w-[18px]" />, group: 'Console' },
-  { id: 'completed', label: 'Completed', icon: <CheckCircle className="h-[18px] w-[18px]" />, group: 'Console' },
-  { id: 'referrals', label: 'Referrals', icon: <Star className="h-[18px] w-[18px]" />, group: 'Console'},
-  { id: 'billing', label: 'Billing', icon: <CircleDollarSign className="h-[18px] w-[18px]" />, group: 'Console' },
+const navItems: { id: Page | string; label: string; sublabel?: string; icon: React.ReactNode; href?: string; external?: boolean; group?: string }[] = [
+  { id: 'home', label: 'Overview', sublabel: 'Your dashboard', icon: <LayoutGrid className="h-[18px] w-[18px]" />, group: 'Order' },
+  { id: 'console-deploy', label: 'Deploy', sublabel: 'Launch a node', icon: <Rocket className="h-[18px] w-[18px]" />, group: 'Order' },
+  { id: 'console-providers', label: 'Providers', sublabel: 'Browse the network', icon: <Briefcase className="h-[18px] w-[18px]" />, group: 'Order' },
+  { id: 'domains', label: 'Domains', sublabel: 'Register a domain', icon: <Globe className="h-[18px] w-[18px]" />, group: 'Order' },
+  { id: 'market', label: 'Market', sublabel: 'Live pricing', icon: <Activity className="h-[18px] w-[18px]" />, group: 'Order' },
+  { id: 'completed', label: 'History', sublabel: 'Past deployments', icon: <CheckCircle className="h-[18px] w-[18px]" />, group: 'Order' },
+  { id: 'earnings', label: 'Earnings', sublabel: 'What you\'ve earned', icon: <CircleDollarSign className="h-[18px] w-[18px]" />, group: 'Account' },
+  { id: 'billing', label: 'Billing', sublabel: 'Balance & payments', icon: <CircleDollarSign className="h-[18px] w-[18px]" />, group: 'Account' },
+  { id: 'referrals', label: 'Referrals', sublabel: 'Invite & earn', icon: <Star className="h-[18px] w-[18px]" />, group: 'Account'},
+  { id: 'analytics', label: 'Earn', sublabel: 'Embed & monetize your site', icon: <BarChart className="h-[18px] w-[18px]" />, href: '/dashboard', group: 'Account' },
 ];
 
 const DEPLOY_FILTERS = ['all', 'active', 'pending', 'closed'] as const;
@@ -65,7 +58,8 @@ function ConsoleHome({ walletId, onNavigate, onNavigateWithParams }: {
 
   return (
     <>
-      <h1 className="text-[28px] font-bold tracking-[-0.02em] text-foreground mb-6">Welcome to Chimera Console!</h1>
+      <h1 className="text-[28px] font-bold tracking-[-0.02em] text-foreground mb-1">Welcome back</h1>
+      <p className="text-[14px] text-muted-foreground mb-6">Deploy your hardware, track earnings, and manage your account — all in one place.</p>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
         <a href="/docs/" className="bg-card border border-border rounded-[14px] p-5 transition hover:border-primary/50">
@@ -74,8 +68,8 @@ function ConsoleHome({ walletId, onNavigate, onNavigateWithParams }: {
               <svg className="w-5 h-5 text-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
             </div>
             <div>
-              <h3 className="text-[15px] font-semibold text-foreground mb-1">Getting started with Chimera Console</h3>
-              <p className="text-[13px] text-muted-foreground leading-relaxed">Learn how to deploy your first local AI node on any device in a few clicks.</p>
+              <h3 className="text-[15px] font-semibold text-foreground mb-1">New here? Start in 3 steps</h3>
+              <p className="text-[13px] text-muted-foreground leading-relaxed">Connect your wallet, pick a device to share or a job to run, and start earning.</p>
             </div>
           </div>
         </a>
@@ -229,19 +223,14 @@ function ConsoleHome({ walletId, onNavigate, onNavigateWithParams }: {
 }
 
 export default function App() {
-  const { user, isAuthenticated, disconnect: logout, connect: web3authConnect, provider: evmWallet, address: evmAddress, isReady, initError } = useWeb3Auth();
-  const [provider, setProvider] = useState<any>(null);
-  const [publicKeyHex, setPublicKeyHex] = useState('');
-  const [accountHash, setAccountHash] = useState('');
+  const { isAuthenticated, disconnect: logout, connect: web3authConnect, provider: evmWallet, address: evmAddress, isReady, initError } = useWeb3Auth();
   const [walletError, setWalletError] = useState('');
-  const [walletDetected, setWalletDetected] = useState(false);
   const [page, setPage] = useState<Page>(() => {
     if (typeof window === 'undefined') return 'home';
     const hash = window.location.hash.replace('#', '');
     return (navItems.find((n) => n.id === hash) ? hash : 'home') as Page;
   });
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
-  const [walletMode, setWalletMode] = useState<'casper' | 'botchain' | 'evm' | null>(null);
   const [walletMenuOpen, setWalletMenuOpen] = useState(false);
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     if (typeof window === 'undefined') return 'dark';
@@ -253,54 +242,23 @@ export default function App() {
     localStorage.setItem('chimera-theme', theme);
   }, [theme]);
 
-  useEffect(() => {
-    const check = () => setWalletDetected(isWalletInstalled());
-    check();
-    const interval = setInterval(check, 1000);
-    return () => clearInterval(interval);
-  }, []);
-
-  const connect = useCallback(async (mode: 'casper' | 'botchain' | 'evm') => {
+  const connect = useCallback(async () => {
     setWalletError('');
-    setWalletMode(mode);
-    if (mode === 'casper') {
-      const res = await connectWallet();
-      if (res.connected && res.provider) {
-        setProvider(res.provider);
-        setPublicKeyHex(res.publicKey);
-        const pk = (await import('casper-js-sdk')).PublicKey.fromHex(res.publicKey);
-        setAccountHash(pk.accountHash().toPrefixedString());
-      } else {
-        setWalletError('Could not connect to Casper Wallet. Make sure the extension is installed and unlocked.');
-      }
-    } else {
-      if (!isReady) {
-        setWalletError(initError || 'Wallet is not ready yet. Please wait a moment and try again.');
-        return;
-      }
-      try {
-        await web3authConnect();
-        if (evmWallet) {
-          if (mode === 'botchain') {
-            await switchToBotchain(evmWallet);
-          } else {
-            await switchToEthereum(evmWallet);
-          }
-        }
-      } catch (e: any) {
-        setWalletError(e?.message || 'Web3Auth login failed');
-      }
+    if (!isReady) {
+      setWalletError(initError || 'Wallet is not ready yet. Please wait a moment and try again.');
+      return;
     }
-  }, [web3authConnect, evmWallet, isReady, initError]);
+    try {
+      await web3authConnect();
+    } catch (e: any) {
+      setWalletError(e?.message || 'Web3Auth login failed');
+    }
+  }, [web3authConnect, isReady, initError]);
 
   const disconnect = useCallback(async () => {
-    if (walletMode === 'casper') {
-      await disconnectWallet();
-    } else if (walletMode === 'botchain' || walletMode === 'evm') {
-      await logout();
-    }
-    setProvider(null); setPublicKeyHex(''); setAccountHash(''); setWalletError(''); setWalletMode(null);
-  }, [walletMode, logout]);
+    await logout();
+    setWalletError('');
+  }, [logout]);
 
   const updateTx = useCallback((_tx: TxRecord) => {}, []);
 
@@ -315,15 +273,14 @@ export default function App() {
     setPage(p);
   }, []);
 
-  const evmConnected = isAuthenticated && !!evmWallet && !!evmAddress;
-  const isConnected = (!!provider && !!publicKeyHex) || (isAuthenticated && !!walletMode && walletMode !== 'casper');
-  const walletId = walletMode === 'casper' ? accountHash : evmAddress || null;
-  const walletLabel = walletMode === 'casper' ? accountHash.replace('account-hash-', '').slice(0, 14) + '...' + accountHash.slice(-6)
-    : walletMode === 'botchain' || walletMode === 'evm' ? (evmAddress ? evmAddress.slice(0, 6) + '...' + evmAddress.slice(-4) : '')
-    : '';
-  const walletNetworkLabel = walletMode === 'casper' ? 'Casper' : walletMode === 'botchain' ? 'Botchain' : walletMode === 'evm' ? 'EVM' : '';
+  const isConnected = isAuthenticated && !!evmWallet && !!evmAddress;
+  const walletId = evmAddress || null;
+  const walletLabel = evmAddress ? evmAddress.slice(0, 6) + '...' + evmAddress.slice(-4) : '';
+  const walletNetworkLabel = 'EVM';
 
-  const currentLabel = navItems.find((n) => n.id === page)?.label || 'Home';
+  const currentNavItem = navItems.find((n) => n.id === page);
+  const currentLabel = currentNavItem?.label || 'Overview';
+  const currentSublabel = currentNavItem?.sublabel;
 
   const handleNav = (item: typeof navItems[number]) => {
     if (item.href) {
@@ -339,34 +296,21 @@ export default function App() {
   };
 
   const renderPage = () => {
-    const consolePages: Page[] = ['home', 'console-deploy', 'console-providers', 'earnings'];
-    const needsCasper = walletMode === 'casper' || (!walletMode && !isAuthenticated);
-    if (needsCasper && !walletDetected && !isConnected && !consolePages.includes(page)) {
-      return (
-        <div className="mb-6 text-sm text-red-500 bg-red-500/5 border border-red-500/10 p-3 rounded-[10px]">
-          <strong>Casper Wallet extension not detected.</strong>
-          <a href="https://chromewebstore.google.com/detail/casper-wallet/" target="_blank" rel="noopener noreferrer" className="underline ml-1 text-foreground">Install it here</a>.
-        </div>
-      );
-    }
     switch (page) {
       case 'home': return <ConsoleHome walletId={walletId} onNavigate={(p) => setPage(p)} onNavigateWithParams={(p, params) => goToPage(p, params)} />;
-      case 'console-deploy': return <ConsoleDeploy walletId={walletId} walletMode={walletMode} provider={provider} publicKeyHex={publicKeyHex} accountHash={accountHash} botchainWallet={evmWallet} evmAddress={evmAddress || ''} onTx={updateTx} onNavigate={(p) => setPage(p as Page)} onCreated={() => setPage('home')} />;
+      case 'console-deploy': return <ConsoleDeploy walletId={walletId} evmAddress={evmAddress || ''} onTx={updateTx} onNavigate={(p) => setPage(p as Page)} onCreated={() => setPage('home')} />;
       case 'console-providers': return <ConsoleProviders />;
-      case 'earnings': return <ConsoleEarnings walletMode={walletMode} casperProvider={provider} casperPublicKeyHex={publicKeyHex} accountHash={accountHash} evmAddress={evmAddress || ''} />;
-      case 'market': return walletMode === 'botchain' ? <BotchainTab onTx={updateTx} /> : <MarketTab />;
-      case 'completed': return walletMode === 'botchain' ? <BotchainTab onTx={updateTx} /> : <CompletedTab />;
-      case 'tasker-manage': return walletMode === 'botchain' ? <BotchainTab onTx={updateTx} /> : <TaskerTab provider={provider} publicKeyHex={publicKeyHex} accountHash={accountHash} onTx={updateTx} fixedCategory="manage" />;
-      case 'tasker-confirm': return walletMode === 'botchain' ? <BotchainTab onTx={updateTx} /> : <TaskerTab provider={provider} publicKeyHex={publicKeyHex} accountHash={accountHash} onTx={updateTx} fixedCategory="rate" />;
-      case 'tasker-disputes': return walletMode === 'botchain' ? <BotchainTab onTx={updateTx} /> : <TaskerTab provider={provider} publicKeyHex={publicKeyHex} accountHash={accountHash} onTx={updateTx} fixedCategory="disputes" />;
+      case 'earnings': return <ConsoleEarnings evmAddress={evmAddress || ''} />;
+      case 'market': return <MarketTab />;
+      case 'completed': return <CompletedTab />;
       case 'referrals': return <ReferralsTab />;
-      case 'billing': return <BillingTab walletMode={walletMode} casperProvider={provider} casperPublicKeyHex={publicKeyHex} botchainWallet={evmWallet} evmAddress={evmAddress || ''} />;
-      case 'domains': return <DomainRegistration walletMode={walletMode} provider={provider} publicKeyHex={publicKeyHex} accountHash={accountHash} botchainWallet={evmWallet} evmAddress={evmAddress || ''} onTx={updateTx} />;
+      case 'billing': return <BillingTab evmAddress={evmAddress || ''} />;
+      case 'domains': return <DomainRegistration evmAddress={evmAddress || ''} onTx={updateTx} />;
       default: return <ConsoleHome walletId={walletId} onNavigate={(p) => setPage(p)} onNavigateWithParams={(p, params) => goToPage(p, params)} />;
     }
   };
 
-  const groups = ['Console'];
+  const groups = ['Order', 'Account'];
 
   return (
     <div className="min-h-screen bg-background text-foreground font-sans">
@@ -391,9 +335,10 @@ export default function App() {
                   <button
                     key={item.id}
                     onClick={() => handleNav(item)}
+                    title={item.sublabel}
                     className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-[10px] text-[14px] font-medium transition text-left ${page === item.id ? 'bg-secondary text-foreground font-semibold' : 'text-muted-foreground hover:bg-secondary hover:text-foreground'}`}>
                     {item.icon}
-                    {item.label}
+                    <span className="flex-1 truncate">{item.label}</span>
                   </button>
                 ))}
               </div>
@@ -411,8 +356,9 @@ export default function App() {
 
         <div className="flex-1 md:ml-[240px] flex flex-col min-h-screen">
           <header className="h-16 bg-card border-b border-border flex items-center justify-between px-6 sticky top-0 z-30">
-            <div className="flex items-center gap-4 ml-10 md:ml-0">
-              <span className="text-[14px] text-muted-foreground">{currentLabel}</span>
+            <div className="flex items-center gap-2 ml-10 md:ml-0 min-w-0">
+              <span className="text-[15px] font-semibold text-foreground truncate">{currentLabel}</span>
+              {currentSublabel && <span className="text-[13px] text-muted-foreground hidden sm:inline truncate">· {currentSublabel}</span>}
             </div>
             <div className="flex items-center gap-3 relative">
               <a
@@ -450,9 +396,7 @@ export default function App() {
                     <Button onClick={() => setWalletMenuOpen(!walletMenuOpen)} className="text-[10px] h-7 px-3 bg-foreground text-background hover:opacity-85"><Wallet className="h-3 w-3 mr-1" />Connect Wallet</Button>
                     {walletMenuOpen && (
                       <div className="absolute right-0 top-full mt-1 w-44 bg-card border border-border rounded-[10px] shadow-lg z-50 overflow-hidden">
-                        <button onClick={() => { setWalletMenuOpen(false); connect('casper'); }} className="w-full text-left px-3 py-2 text-[12px] text-foreground hover:bg-secondary flex items-center gap-2"><Wallet className="h-3 w-3" />Casper Wallet</button>
-                        <button onClick={() => { setWalletMenuOpen(false); connect('botchain'); }} className="w-full text-left px-3 py-2 text-[12px] text-foreground hover:bg-secondary flex items-center gap-2"><Wallet className="h-3 w-3" />Botchain</button>
-                        <button onClick={() => { setWalletMenuOpen(false); connect('evm'); }} className="w-full text-left px-3 py-2 text-[12px] text-foreground hover:bg-secondary flex items-center gap-2"><Wallet className="h-3 w-3" />EVM</button>
+                        <button onClick={() => { setWalletMenuOpen(false); connect(); }} className="w-full text-left px-3 py-2 text-[12px] text-foreground hover:bg-secondary flex items-center gap-2"><Wallet className="h-3 w-3" />Connect EVM Wallet</button>
                       </div>
                     )}
                   </div>

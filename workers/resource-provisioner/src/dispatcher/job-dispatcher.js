@@ -3,6 +3,7 @@ import { CasperClient, CASPER_JOB_STATE } from '../contracts/casper-client.js';
 import { executeViaTaskingNetwork } from './execution-router.js';
 import { VolunteerCoordinator } from '../coordinator/server.js';
 import { normalizeTaskType } from '../coordinator/task-types.js';
+import { zeroAddress } from 'viem';
 
 const VOLUNTEER_DISPATCH_MS = Number(process.env.VOLUNTEER_DISPATCH_MS || '10000');
 const VOLUNTEER_DISPATCH_RETRIES = Number(process.env.VOLUNTEER_DISPATCH_RETRIES || '2');
@@ -126,7 +127,7 @@ export class JobDispatcher {
       if (policy === TASK_POLICY.FIRST_PARTY_ONLY) continue;
 
       // Second-party-only and hybrid jobs assigned to the coordinator need tasking-network fallback.
-      if (job.providerAuthority && job.providerAuthority !== ethersZeroAddress() && !isCoordinatorJob) continue;
+      if (job.providerAuthority && job.providerAuthority !== zeroAddress && !isCoordinatorJob) continue;
 
       const canonicalTaskType = normalizeTaskType(job.taskType, 'botchain');
       this.seenJobs.set(key, { network: 'botchain', firstSeen: Date.now(), handled: false, policy });
@@ -282,9 +283,6 @@ export class JobDispatcher {
   }
 }
 
-function ethersZeroAddress() {
-  return '0x' + '0'.repeat(40);
-}
 
 function isZeroProvider(providerHex) {
   return !providerHex || providerHex === '0'.repeat(64);

@@ -1,4 +1,4 @@
-import crypto from 'crypto';
+import { signTypedData, hashTypedData } from 'viem';
 import { Logger } from '../core/Logger.js';
 
 /**
@@ -25,8 +25,8 @@ import { Logger } from '../core/Logger.js';
 const EIP712_DOMAIN = {
   name: 'ChimeraEscrow',
   version: '1',
-  chainId: 11155111, // Sepolia testnet
-  verifyingContract: '0x0000000000000000000000000000000000000000', // placeholder
+  chainId: 4663, // Robinhood Chain mainnet
+  verifyingContract: '0x0000000000000000000000000000000000000000', // set at runtime
 };
 
 const EIP712_TYPES = {
@@ -50,6 +50,7 @@ export class EscrowChannel {
     }
     this._channels = new Map(); // channelId -> { buyer, seller, deposit, spent, nonce, vouchers, status, openedAt }
     this._walletManager = null;
+    this._privateKey = config.privateKey || null;
     this._stats = {
       totalChannels: 0,
       totalVouchers: 0,
@@ -132,9 +133,9 @@ export class EscrowChannel {
       seller: channel.seller,
     };
 
-    // Sign voucher (EIP-712 typed data)
+    // Sign voucher (EIP-712 typed data) via viem
     let signature = null;
-    if (this._walletManager && this._walletManager.signTypedData) {
+    if (this._walletManager?.signTypedData) {
       try {
         signature = await this._walletManager.signTypedData(
           this.domain,
@@ -142,11 +143,24 @@ export class EscrowChannel {
           voucher
         );
       } catch (e) {
-        this.logger.warn(`Failed to sign voucher: ${e.message}`);
-        signature = this._mockSign(voucher);
+        this.logger.warn(`WalletManager sign failed: ${e.message}`);
       }
-    } else {
-      signature = this._mockSign(voucher);
+    }
+    if (!signature && this._privateKey) {
+      try {
+        signature = await signTypedData({
+          domain: this.domain,
+          types: EIP712_TYPES,
+          primaryType: 'Voucher',
+          message: voucher,
+          privateKey: this._privateKey,
+        });
+      } catch (e) {
+        this.logger.warn(`viem signTypedData failed: ${e.message}`);
+      }
+    }
+    if (!signature) {
+      throw new Error('No signing method available — set walletManager or privateKey');
     }
 
     channel.vouchers.push({ voucher, signature, createdAt: Date.now() });
@@ -158,15 +172,25 @@ export class EscrowChannel {
   }
 
   /**
-   * Verify a voucher signature.
+   * Verify a voucher signature using viem recoverTypedDataAddress.
    */
-  verifyVoucher(voucher, signature) {
-    // In production, recover address from EIP-712 signature and compare to voucher.buyer
-    // For now, check basic structure
+  async verifyVoucher(voucher, signature) {
     if (!voucher || !signature) return false;
     if (!voucher.channel || !voucher.amount || !voucher.nonce) return false;
     if (voucher.deadline < Math.floor(Date.now() / 1000)) return false;
-    return true;
+    try {
+      const { recoverTypedDataAddress } = await import('viem');
+      const recovered = await recoverTypedDataAddress({
+        domain: this.domain,
+        types: EIP712_TYPES,
+        primaryType: 'Voucher',
+        message: voucher,
+        signature,
+      });
+      return recovered.toLowerCase() === voucher.buyer.toLowerCase();
+    } catch {
+      return false;
+    }
   }
 
   /**
@@ -178,7 +202,12 @@ export class EscrowChannel {
     const channel = this._channels.get(channelId);
     if (!channel) throw new Error(`Channel ${channelId} not found`);
 
-    const validVouchers = channel.vouchers.filter(v => this.verifyVoucher(v.voucher, v.signature));
+    const validVouchers = [];
+    for (const v of channel.vouchers) {
+      if (await this.verifyVoucher(v.voucher, v.signature)) {
+        validVouchers.push(v);
+      }
+    }
     const totalAmount = validVouchers.reduce((sum, v) => sum + v.voucher.amount, 0);
 
     let txHash = null;
@@ -265,11 +294,6 @@ export class EscrowChannel {
       voucherCount: c.vouchers.length,
     }));
     return status ? all.filter(c => c.status === status) : all;
-  }
-
-  _mockSign(voucher) {
-    const data = JSON.stringify(voucher);
-    return `0x${crypto.createHash('sha256').update(data).digest('hex').slice(0, 130)}`;
   }
 
   getStats() {

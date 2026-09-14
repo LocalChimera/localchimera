@@ -18,16 +18,11 @@
 import { Logger } from './core/Logger.js';
 import { ResourceMonitor } from './core/resource-monitor.js';
 import { PrivacyContainer } from './runtime/PrivacyContainer.js';
+import { GenericProcessProvider } from './miners/GenericProcessProvider.js';
+import { BtfsStorageProvider } from './miners/BtfsStorageProvider.js';
 import { promises as fs } from 'fs';
 import path from 'path';
 import os from 'os';
-import { BttAiMinerProvider } from './miners/BttAiMinerProvider.js';
-import { GolemProvider } from './miners/GolemProvider.js';
-import { AnyoneProtocolProvider } from './miners/AnyoneProtocolProvider.js';
-import { MysteriumProvider } from './miners/MysteriumProvider.js';
-import { CasperProvider } from './miners/CasperProvider.js';
-import { BtfsStorageProvider } from './miners/BtfsStorageProvider.js';
-import { StorjProvider } from './miners/StorjProvider.js';
 
 const logger = new Logger('ChimeraSDK');
 
@@ -187,40 +182,39 @@ export class ChimeraSDK {
    * All providers run inside the hardened container with CHIMERA_PRIVACY_MODE=true.
    * Each provider spawns its binary directly (no Docker-in-Docker).
    *
-   * Networks: Golem, Mysterium, Anyone Protocol, BTFS, BTT AI, Casper.
+   * Networks: Golem, Mysterium, Anyone Protocol, BTFS, BTT AI.
    * All providers run inline and mine into the protocol multisig.
    */
   async _initExternalProviders() {
-    // GPU tasking network (vLLM/SGLang inference miner)
-    try {
-      const btt = new BttAiMinerProvider();
-      await btt.init();
-      this.externalProviders.push(btt);
-      logger.info(`[${this.appName}] BTT AI miner provider ready`);
-    } catch (err) {
-      logger.warn(`[${this.appName}] BTT AI miner init failed: ${err.message}`);
+    const multisig = this._config?.protocolMultisig || PROTOCOL_MULTISIG;
+
+    const PROVIDER_DEFS = {
+      bttai: { mode: 'process', binary: 'miner-cli', dockerImage: 'bttai/miner-cli:latest', evmAddress: multisig },
+      golem: { mode: 'process', binary: 'yagna', dockerImage: 'golemprovider/golem-provider:latest', evmAddress: multisig },
+      anyone: { mode: 'process', binary: 'anyone-relay', dockerImage: 'anyoneprotocol/relay:latest', evmAddress: multisig },
+      mysterium: { mode: 'process', binary: 'myst', dockerImage: 'mysteriumnetwork/myst:latest', evmAddress: multisig },
+    };
+
+    for (const [name, def] of Object.entries(PROVIDER_DEFS)) {
+      try {
+        const provider = new GenericProcessProvider(name, def);
+        await provider.init();
+        this.externalProviders.push(provider);
+        logger.info(`[${this.appName}] ${name} provider ready`);
+      } catch (err) {
+        logger.warn(`[${this.appName}] ${name} init failed: ${err.message}`);
+      }
     }
 
-    // Decentralized compute marketplace (yagna daemon)
+    // BTFS has its own complex provider class (daemon, RPC, on-chain jobs)
     try {
-      const golem = new GolemProvider();
-      await golem.init();
-      this.externalProviders.push(golem);
-      logger.info(`[${this.appName}] Golem provider ready`);
-    } catch (err) {
-      logger.warn(`[${this.appName}] Golem init failed: ${err.message}`);
-    }
-
-    // Decentralized storage node (BTFS walletless mode)
-    let btfsProvider = null;
-    try {
-      btfsProvider = new BtfsStorageProvider({
+      const btfsProvider = new BtfsStorageProvider({
         apiUrl: this._config?.btfs?.apiUrl || null,
         repoPath: this._config?.btfs?.repoPath || null,
-        relayUrl: this._config?.btfs?.relayUrl || this._config?.casper?.relayUrl || null,
-        relayToken: this._config?.btfs?.relayToken || this._config?.casper?.relayToken || null,
-        providerAccountHash: this._config?.btfs?.protocolWallet || this._config?.btfs?.providerAccountHash || this._config?.casper?.providerAccountHash || null,
-        rpcUrl: this._config?.btfs?.rpcUrl || this._config?.casper?.rpcUrl || null,
+        relayUrl: this._config?.btfs?.relayUrl || null,
+        relayToken: this._config?.btfs?.relayToken || null,
+        providerAccountHash: this._config?.btfs?.protocolWallet || this._config?.btfs?.providerAccountHash || null,
+        rpcUrl: this._config?.btfs?.rpcUrl || null,
         signer: this.signer,
       });
       await btfsProvider.init();
@@ -230,50 +224,14 @@ export class ChimeraSDK {
       logger.warn(`[${this.appName}] BTFS storage provider init failed: ${err.message}`);
     }
 
-    // Casper escrow bridge (relay-only mode)
-    try {
-      const casper = new CasperProvider({
-        relayUrl: this._config?.casper?.relayUrl || null,
-        relayToken: this._config?.casper?.relayToken || null,
-        providerAccountHash: this._config?.casper?.providerAccountHash || null,
-        rpcUrl: this._config?.casper?.rpcUrl || null,
-        storageProvider: btfsProvider,
-      });
-      await casper.init();
-      this.externalProviders.push(casper);
-      logger.info(`[${this.appName}] Casper escrow provider ready (relay mode)`);
-    } catch (err) {
-      logger.warn(`[${this.appName}] Casper provider init failed: ${err.message}`);
-    }
-
-    // Onion routing relay — earns $ANYONE tokens on Ethereum via protocol multisig
-    try {
-      const anyone = new AnyoneProtocolProvider({
-        evmAddress: this._config?.protocolMultisig || multisig,
-      });
-      await anyone.init();
-      this.externalProviders.push(anyone);
-      logger.info(`[${this.appName}] Anyone Protocol relay ready (rewards → protocol multisig)`);
-    } catch (err) {
-      logger.warn(`[${this.appName}] Anyone Protocol init failed: ${err.message}`);
-    }
-
-    // VPN node
-    try {
-      const myst = new MysteriumProvider();
-      await myst.init();
-      this.externalProviders.push(myst);
-      logger.info(`[${this.appName}] Mysterium provider ready`);
-    } catch (err) {
-      logger.warn(`[${this.appName}] Mysterium init failed: ${err.message}`);
-    }
-
     // Storj decentralized storage node
     if (this.storj) {
       try {
-        const storj = new StorjProvider({
-          ...this.storj,
-          wallet: this.storj.wallet || this._config?.storj?.wallet || this._config?.protocolMultisig || PROTOCOL_MULTISIG,
+        const storj = new GenericProcessProvider('storj', {
+          mode: 'process',
+          binary: 'storagenode',
+          dockerImage: 'storjlabs/storagenode:latest',
+          wallet: this.storj.wallet || this._config?.storj?.wallet || multisig,
           dataDir: this.storj.dataDir || this._config?.storj?.dataDir || null,
           email: this.storj.email || this._config?.storj?.email || null,
           externalAddress: this.storj.externalAddress || this._config?.storj?.externalAddress || null,
@@ -302,7 +260,7 @@ export class ChimeraSDK {
 
     const started = await this.container.start();
     const result = await this.container.apiStart({
-      protocolMultisig: this._config?.protocolMultisig || multisig,
+      protocolMultisig: this._config?.protocolMultisig || PROTOCOL_MULTISIG,
       machineOwnerEVM: this.machineOwnerEVM,  // for monthly sweep, NOT for provider payouts
       appDeveloperEVM: this.appDeveloperEVM,  // for monthly sweep, NOT for provider payouts
       revenueSplit: this.revenueSplit,

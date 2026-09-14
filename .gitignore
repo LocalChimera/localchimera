@@ -13,6 +13,7 @@ out/
 # Foundry / inference generated libs (tracked submodules are exceptions)
 lib/encrypted-types/
 lib/fhevm-sdk/
+lib/openzeppelin-contracts/
 
 # Logs & data
 **/logs/
@@ -69,3 +70,4 @@ forward_txns.json
 # Generated frontend docs (source is the READMEs; regenerate with npm run generate-docs)
 qvac/frontend/public/docs/LOCALCHIMERA.md
 qvac/frontend/public/docs/LOCALCHIMERA.html
+qvac/scripts/

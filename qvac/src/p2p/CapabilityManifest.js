@@ -1,70 +1,31 @@
 import crypto from 'crypto';
 import { Logger } from '../core/Logger.js';
+import { signMessage, recoverAddress, bytesToHex } from 'viem';
 
 /**
  * CapabilityManifest — signed peer capability advertisements.
  *
- * Inspired by daemon-hive-swarm: peers advertise their model inventory,
- * dataset opt-ins, and provider availability via signed capability manifests.
- * This enables intelligent inference delegation across the P2P mesh.
- *
- * Manifest fields:
- *   - peerId: public key of the peer
- *   - models: list of available models (name, type, ctxSize)
- *   - datasets: opt-in dataset types this peer is willing to share
- *   - provider: whether this peer accepts delegated inference requests
- *   - capacity: max concurrent requests, avg latency
- *   - timestamp: when the manifest was created
- *   - signature: secp256k1 signature over the manifest hash
+ * Uses viem (MIT) for secp256k1 signing and verification.
+ * Peers advertise their model inventory, dataset opt-ins, and provider
+ * availability via signed capability manifests.
  */
 
 export class CapabilityManifest {
   constructor(config = {}) {
     this.logger = new Logger('CapabilityManifest');
-    this.privateKey = config.privateKey || null;
-    this.publicKey = null;
+    this.privateKey = config.privateKey || bytesToHex(crypto.randomBytes(32));
+    this.address = null;
     this.ourManifest = null;
     this.peerManifests = new Map();
-    this._initKeyPair();
-  }
-
-  _initKeyPair() {
-    if (this.privateKey) {
-      this.privateKey = BigInt('0x' + this.privateKey);
-    } else {
-      const { randomBytes } = crypto;
-      this.privateKey = BigInt('0x' + randomBytes(32).toString('hex')) % BigInt('0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141');
-      if (this.privateKey === BigInt(0)) this.privateKey = BigInt(1);
-    }
-    // Use the same secp256k1 implementation as ProofOfInference
-    this._crypto = this._createCrypto();
-    this.publicKey = this._crypto.getPublicKey(this.privateKey);
-    this.logger.info(`CapabilityManifest keypair initialized`);
-  }
-
-  _createCrypto() {
-    // Use Node.js crypto for ed25519-style signing (HMAC-based for simplicity)
-    // This avoids requiring a CJS module in ESM context
-    return {
-      getPublicKey: (privKey) => {
-        return Buffer.from(privKey.toString(16).padStart(64, '0'), 'hex');
-      },
-      sign: (msgHash, privKey) => {
-        return crypto.createHmac('sha256', privKey.toString(16)).update(msgHash).digest('hex');
-      },
-      verify: (msgHash, signature, pubKey) => {
-        const expected = crypto.createHmac('sha256', pubKey.toString('hex')).update(msgHash).digest('hex');
-        return expected === signature;
-      },
-    };
+    this.logger.info('CapabilityManifest keypair initialized');
   }
 
   /**
    * Build and sign our capability manifest.
    */
-  createManifest({ peerId, models = [], datasets = [], provider = false, capacity = {} }) {
+  async createManifest({ peerId, models = [], datasets = [], provider = false, capacity = {} }) {
     const manifest = {
-      peerId: peerId || this.publicKey.toString('hex'),
+      peerId: peerId || this.address || 'unknown',
       models,
       datasets,
       provider,
@@ -74,13 +35,15 @@ export class CapabilityManifest {
         ...capacity,
       },
       timestamp: Date.now(),
-      version: 1,
+      version: 2,
     };
 
     const manifestHash = crypto.createHash('sha256')
       .update(JSON.stringify(manifest)).digest('hex');
-    manifest.signature = this._crypto.sign(manifestHash, this.privateKey);
+    const signature = await signMessage({ message: manifestHash, privateKey: this.privateKey });
+    manifest.signature = signature;
     manifest.manifestHash = manifestHash;
+    manifest.signerAddress = this.address;
 
     this.ourManifest = manifest;
     return manifest;
@@ -89,12 +52,12 @@ export class CapabilityManifest {
   /**
    * Verify a peer's manifest signature.
    */
-  verifyManifest(manifest) {
+  static async verifyManifest(manifest) {
     if (!manifest || !manifest.signature || !manifest.manifestHash) {
       return { valid: false, reason: 'Missing signature or hash' };
     }
 
-    const { signature, manifestHash, ...rest } = manifest;
+    const { signature, manifestHash, signerAddress, ...rest } = manifest;
     const computedHash = crypto.createHash('sha256')
       .update(JSON.stringify(rest)).digest('hex');
 
@@ -102,8 +65,14 @@ export class CapabilityManifest {
       return { valid: false, reason: 'Hash mismatch — manifest tampered' };
     }
 
-    const sigValid = this._crypto.verify(manifestHash, signature, this.publicKey);
-    if (!sigValid) return { valid: false, reason: 'Signature invalid' };
+    try {
+      const recovered = await recoverAddress({ message: manifestHash, signature });
+      if (signerAddress && recovered.toLowerCase() !== signerAddress.toLowerCase()) {
+        return { valid: false, reason: 'Signature does not match signer address' };
+      }
+    } catch {
+      return { valid: false, reason: 'Signature verification failed' };
+    }
 
     return { valid: true, timestamp: manifest.timestamp };
   }
@@ -111,8 +80,8 @@ export class CapabilityManifest {
   /**
    * Store a peer's manifest.
    */
-  storePeerManifest(peerId, manifest) {
-    const verification = this.verifyManifest(manifest);
+  async storePeerManifest(peerId, manifest) {
+    const verification = await CapabilityManifest.verifyManifest(manifest);
     if (!verification.valid) {
       this.logger.warn(`Rejected manifest from ${peerId}: ${verification.reason}`);
       return false;

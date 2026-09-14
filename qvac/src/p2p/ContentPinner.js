@@ -1,26 +1,14 @@
 import crypto from 'crypto';
 import { Logger } from '../core/Logger.js';
+import { createHelia } from 'helia';
+import { unixfs } from '@helia/unixfs';
 
 /**
- * ContentPinner — replicates important content to N peers via P2P.
+ * ContentPinner — replicates important content to N peers via P2P + IPFS.
  *
- * Inspired by hologram-os's content pinning: critical data (inference
- * receipts, wiki pages, RAG documents) is pinned to multiple peers for
- * durability. If one peer goes offline, the content is still available
- * from other pinned peers.
- *
- * Pinning protocol:
- *   1. Node calls pin(contentHash, data) → encrypts if needed
- *   2. Broadcasts { type: 'content-pin', hash, data, ttl } to peers
- *   3. Peers store the pinned content and acknowledge
- *   4. Node tracks pin acknowledgements
- *   5. When ack count ≥ replicationFactor, content is "pinned"
- *
- * Unpinning:
- *   - Broadcast { type: 'content-unpin', hash } to peers
- *   - Peers remove the pinned content
- *
- * Content is stored encrypted if CryptoVault is available.
+ * Uses helia (MIT/Apache-2.0) for IPFS-based content pinning.
+ * Critical data (inference receipts, wiki pages, RAG documents) is pinned
+ * to multiple peers for durability via both P2P broadcast and IPFS.
  */
 
 export class ContentPinner {
@@ -33,14 +21,33 @@ export class ContentPinner {
     this._remotePinned = new Map(); // hash → { data, from, pinnedAt }
     this._p2p = null;
     this._cryptoVault = null;
+    this._helia = null;
+    this._fs = null;
     this._stats = {
       totalPinned: 0,
       totalUnpinned: 0,
       totalAcks: 0,
       remoteStored: 0,
       remoteEvicted: 0,
+      ipfsPins: 0,
     };
     this._cleanupTimer = null;
+  }
+
+  /**
+   * Initialize helia IPFS node.
+   */
+  async start() {
+    if (this._cleanupTimer) return;
+    try {
+      this._helia = await createHelia();
+      this._fs = unixfs(this._helia);
+      this.logger.info('Helia IPFS node started');
+    } catch (e) {
+      this.logger.warn(`Helia init failed, falling back to P2P-only: ${e.message}`);
+    }
+    this._cleanupTimer = setInterval(() => this.cleanup(), 300000);
+    this._cleanupTimer.unref?.();
   }
 
   /**
@@ -103,7 +110,21 @@ export class ContentPinner {
     });
 
     this.logger.info(`Pinning content ${contentHash.slice(0, 16)}... to ${this.replicationFactor} peers`);
-    return { pinned: true, hash: contentHash, acks: 0, required: this.replicationFactor };
+
+    // Also pin to IPFS via helia if available
+    let ipfsCid = null;
+    if (this._fs) {
+      try {
+        const text = typeof payload === 'string' ? payload : JSON.stringify(payload);
+        ipfsCid = await this._fs.addBytes(Buffer.from(text, 'utf-8'));
+        this._stats.ipfsPins++;
+        this.logger.debug(`IPFS pin: ${ipfsCid.toString()}`);
+      } catch (e) {
+        this.logger.warn(`IPFS pin failed: ${e.message}`);
+      }
+    }
+
+    return { pinned: true, hash: contentHash, acks: 0, required: this.replicationFactor, ipfsCid: ipfsCid?.toString() || null };
   }
 
   /**
@@ -247,16 +268,13 @@ export class ContentPinner {
     if (removed > 0) this.logger.debug(`Cleaned up ${removed} expired pins`);
   }
 
-  start() {
-    if (this._cleanupTimer) return;
-    this._cleanupTimer = setInterval(() => this.cleanup(), 300000); // 5 min
-    this._cleanupTimer.unref?.();
-  }
-
   stop() {
     if (this._cleanupTimer) {
       clearInterval(this._cleanupTimer);
       this._cleanupTimer = null;
+    }
+    if (this._helia) {
+      this._helia.stop().catch(() => {});
     }
   }
 
@@ -277,6 +295,7 @@ export class ContentPinner {
       totalAcks: this._stats.totalAcks,
       remoteStored: this._stats.remoteStored,
       remoteEvicted: this._stats.remoteEvicted,
+      ipfsPins: this._stats.ipfsPins,
     };
   }
 }

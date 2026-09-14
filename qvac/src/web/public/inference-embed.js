@@ -138,8 +138,7 @@
 
     // Connect to QVAC-Pear mining networks
     // This would establish connections to:
-    // - Casper (Casper Network — relay mode, untrusted-safe)
-    // - Botchain (EVM testnet — relay mode, untrusted-safe)
+    // - Botchain (EVM — relay mode, untrusted-safe)
 
     // Register with the API
     registerWithAPI();

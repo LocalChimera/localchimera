@@ -4,9 +4,9 @@ Run a tasker network node entirely in the browser. No download required.
 
 ## What it does
 
-The user connects their Casper or Web3Auth (EVM) wallet, presses Start, and the browser:
+The user connects their Web3Auth (EVM) wallet, presses Start, and the browser:
 
-1. **Registers** as a provider on all 4 Casper escrow market contracts (Inference, Storage, Compute, Bandwidth)
+1. **Registers** as a provider on all 4 escrow market contracts (Inference, Storage, Compute, Bandwidth) on Robinhood Chain
 2. **Polls** for pending/auto-assigned jobs
 3. **Processes** them in-browser using open-source libraries:
    - Inference: `@mlc-ai/web-llm` (WebGPU LLM) + `@huggingface/transformers` (fallback)
@@ -45,11 +45,7 @@ npm install @localchimera/browser-sdk
 ```typescript
 import { BrowserNode } from '@localchimera/browser-sdk';
 
-const node = new BrowserNode(
-  casperWalletProvider,  // from Casper Wallet extension
-  publicKeyHex,          // user's public key hex
-  accountHash            // user's account hash string
-);
+const node = new BrowserNode({ evmProvider, evmAddress });
 
 node.onStatusUpdate((status) => {
   console.log('Running:', status.running);
@@ -119,12 +115,10 @@ function BrowserNodePanel({ provider, publicKeyHex, accountHash }) {
 ### `BrowserNode`
 
 ```typescript
-new BrowserNode(provider: any, publicKeyHex: string, accountHash: string)
-// or
 new BrowserNode({ evmProvider, evmAddress }: BrowserNodeOptions)
 ```
 
-Casper mode requires `casperProvider`, `publicKeyHex`, and `accountHash`. EVM/Web3Auth mode requires `evmProvider` and `evmAddress`. Full job processing is implemented for both Casper and Botchain.
+EVM/Web3Auth mode requires `evmProvider` and `evmAddress`. Full job processing is implemented for EVM/Botchain.
 
 | Method | Returns | Description |
 |--------|---------|-------------|
@@ -152,17 +146,17 @@ Casper mode requires `casperProvider`, `publicKeyHex`, and `accountHash`. EVM/We
 | `marketRegistrations` | `Record<string, string>` | Per-market registration status |
 | `fingerprint` | `string \| null` | Device fingerprint |
 | `deviceTrustScore` | `number` | Trust score (0-1) |
-| `walletMode` | `'casper' \| 'evm' \| null` | Active wallet mode |
+| `walletMode` | `'evm' \| null` | Active wallet mode |
 | `evmAddress` | `string \| null` | EVM address when in EVM mode |
 
 ## RPC Proxy
 
-The SDK expects a Casper RPC proxy at `/api/rpc` on the same origin. If you're hosting on Cloudflare Pages, use a Functions worker:
+The SDK expects an EVM RPC proxy at `/api/rpc` on the same origin. If you're hosting on Cloudflare Pages, use a Functions worker:
 
 ```js
 // functions/api/rpc/[[path]].js
 export async function onRequest(context) {
-  const url = 'https://node.testnet.casper.network/rpc';
+  const url = 'https://rpc.mainnet.chain.robinhood.com';
   const response = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

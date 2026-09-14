@@ -1,5 +1,12 @@
 import { Logger } from './Logger.js';
+import { createWalletClient, http, getAddress, isAddress } from 'viem';
+import { robinhoodChain } from '../config/chains.js';
 
+/**
+ * WalletManager — manages EVM wallets for miners using viem.
+ * Uses viem (MIT) for wallet client creation and address validation.
+ * Uses @openfort/openfort-node for account abstraction when available.
+ */
 export class WalletManager {
   constructor(config) {
     this.config = config;
@@ -53,26 +60,19 @@ export class WalletManager {
       return false;
     }
 
-    // Basic validation based on network type
     switch (network) {
       case 'arbitrum':
       case 'arbitrum-testnet':
-        // EVM address validation (0x + 40 hex characters)
-        return /^0x[a-fA-F0-9]{40}$/.test(address);
-      
-      case 'bittensor':
-        // Bittensor addresses are typically SS58 format (starts with specific prefix)
-        return /^[a-zA-Z0-9]{47,}$/.test(address);
-      
       case 'evm':
-        // EVM address validation
-        return /^0x[a-fA-F0-9]{40}$/.test(address);
+      case 'robinhood':
+        return isAddress(address);
+
+      case 'bittensor':
+        return /^[a-zA-Z0-9]{47,}$/.test(address);
 
       case 'bitcoin-lightning':
-        // Lightning network addresses (BOLT11 invoice format or node ID)
-        // This is a basic check - real validation would be more complex
         return address.length > 20 && /^[a-zA-Z0-9]+$/.test(address);
-      
+
       default:
         this.logger.warn(`Unknown network type: ${network}, accepting address`);
         return true;

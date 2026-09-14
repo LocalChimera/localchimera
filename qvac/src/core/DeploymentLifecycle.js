@@ -1,21 +1,14 @@
 import { Logger } from '../core/Logger.js';
 import { promises as fsp } from 'fs';
 import path from 'path';
+import EventEmitter from 'eventemitter3';
 
 /**
  * DeploymentLifecycle — phase-based deployment tracking with SSE streaming.
  *
- * Inspired by acurast-deployer-service: deployments run in phases
- * (uploaded → prepared → submitted → matching → matched → ack → env-set →
- *  started → model_loading → model_ready), with live progress streamed
- *  over Server-Sent Events.
- *
- * In Chimera, this tracks the lifecycle of:
- *   - Worker node deployments (fleet orchestration)
- *   - P2P peer provisioning
- *   - Model distribution across the mesh
- *
- * History is persisted to a JSONL file (no database required).
+ * Uses eventemitter3 (MIT) for event emission.
+ * Tracks the lifecycle of worker node deployments, P2P peer provisioning,
+ * and model distribution across the mesh.
  */
 
 const PHASES = [
@@ -48,8 +41,9 @@ const PHASE_LABELS = {
   rolled_back: 'Deployment rolled back to previous state',
 };
 
-export class DeploymentLifecycle {
+export class DeploymentLifecycle extends EventEmitter {
   constructor(config = {}) {
+    super();
     this.logger = new Logger('DeploymentLifecycle');
     this.dataDir = config.dataDir || path.join(process.cwd(), 'data', 'deployments');
     this._deployments = new Map();
@@ -126,6 +120,7 @@ export class DeploymentLifecycle {
 
     this._persist(dep);
     this._notifySubscribers(deploymentId, dep);
+    this.emit('phaseChange', { deploymentId, phase, deployment: dep });
     this.logger.info(`Deployment ${deploymentId} → ${phase}`);
     return dep;
   }

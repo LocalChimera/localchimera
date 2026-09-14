@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { Wallet } from 'ethers';
+import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts';
 import { ed25519 } from '@noble/curves/ed25519';
 import bs58 from 'bs58';
 
@@ -19,10 +19,11 @@ async function fetchJwt({ walletAddress, message, signature, chain }) {
 }
 
 test('SDK creates EVM-backed MPC wallet via createMpcWalletFromJwt', async ({ page }) => {
-  const wallet = Wallet.createRandom();
-  const walletAddress = wallet.address;
+  const privateKey = generatePrivateKey();
+  const account = privateKeyToAccount(privateKey);
+  const walletAddress = account.address;
   const message = `Sign in to LocalChimera with ${walletAddress} at ${new Date().toISOString()}`;
-  const signature = await wallet.signMessage(message);
+  const signature = await account.signMessage({ message });
 
   const { jwt, sub } = await fetchJwt({ walletAddress, message, signature, chain: 'evm' });
   expect(jwt).toBeTruthy();

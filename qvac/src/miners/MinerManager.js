@@ -1,11 +1,6 @@
 import { Logger } from '../core/Logger.js';
-import { CasperEscrowBridge } from './CasperEscrowBridge.js';
-import { BotchainEscrowBridge } from './BotchainEscrowBridge.js';
 import { SdkProviderMiner } from './SdkProviderMiner.js';
-import { GolemProvider } from '../../../sdk/src/miners/GolemProvider.js';
-import { MysteriumProvider } from '../../../sdk/src/miners/MysteriumProvider.js';
-import { AnyoneProtocolProvider } from '../../../sdk/src/miners/AnyoneProtocolProvider.js';
-import { BttAiMinerProvider } from '../../../sdk/src/miners/BttAiMinerProvider.js';
+import { GenericProcessProvider } from '../../../sdk/src/miners/GenericProcessProvider.js';
 import { BtfsStorageProvider } from '../../../sdk/src/miners/BtfsStorageProvider.js';
 
 export class MinerManager {
@@ -30,60 +25,90 @@ export class MinerManager {
     }
 
     // Initialize miners based on config
-    if (this.config.casper?.enabled) {
-      const miner = new CasperEscrowBridge(this.config.casper.config, this.inferenceLayer);
-      await miner.initialize();
-      this.miners.set('casper', miner);
+
+    // ─── Provider definitions (config-driven, replaces 8 individual provider classes) ───
+    const PROVIDER_DEFS = {
+      golem: {
+        mode: 'process',
+        binary: 'yagna',
+        dockerImage: 'golemprovider/golem-provider:latest',
+        dockerName: 'golem-provider',
+        dockerArgs: ['-v', '/var/run/docker.sock:/var/run/docker.sock'],
+        inlineArgs: ['service', 'run'],
+        envVars: { GOLEM_SUBNET: this.config.golem?.config?.subnet || 'public' },
+        requires: ['docker'],
+        resources: 'CPU + optional GPU',
+      },
+      mysterium: {
+        mode: 'process',
+        binary: 'myst',
+        dockerImage: 'mysteriumnetwork/myst:latest',
+        dockerName: 'mysterium-node',
+        dockerArgs: ['--cap-add', 'NET_ADMIN', '-p', '5252:5252'],
+        inlineArgs: ['service', '--agreed-terms-and-conditions', '--data-dir', ''],
+        requires: ['docker'],
+        resources: 'Bandwidth (VPN relay)',
+      },
+      'anyone-protocol': {
+        mode: 'process',
+        binary: 'anyone-relay',
+        dockerImage: 'anyoneprotocol/relay:latest',
+        dockerName: 'anyone-relay',
+        dockerArgs: ['-p', '9001:9001'],
+        inlineArgs: ['--port', '9001'],
+        requires: ['docker'],
+        resources: 'Bandwidth + CPU',
+        rewardToken: 'ANYONE',
+        rewardChain: 'ethereum',
+      },
+      'btt-ai': {
+        mode: 'process',
+        binary: 'miner-cli',
+        inlineArgs: ['up', '-f', ''],
+        requires: ['nvidia-smi', 'python3'],
+        requiresDir: false,
+        startupTimeout: 10000,
+        resources: 'GPU required (NVIDIA)',
+      },
+      sentinel: {
+        mode: 'api',
+        requires: ['apiKey'],
+        resources: 'Bandwidth relay (WebRTC + WireGuard)',
+      },
+      spheron: {
+        mode: 'api',
+        requires: ['apiKey'],
+        resources: 'Consumer GPU compute (Fizz Nodes)',
+      },
+      crust: {
+        mode: 'api',
+        apiUrl: 'https://api.crust.network',
+        requiresDir: false,
+        resources: 'IPFS pinning + storage incentive layer',
+      },
+      infernet: {
+        mode: 'api',
+        apiUrl: 'https://api.infernet.protocol',
+        requires: ['apiKey'],
+        requiresDir: false,
+        resources: 'Open inference (Ollama/vLLM, any-token payments)',
+      },
+    };
+
+    for (const [name, def] of Object.entries(PROVIDER_DEFS)) {
+      if (this.config[name]?.enabled) {
+        const cfg = { ...def, ...(this.config[name].config || {}) };
+        const provider = new GenericProcessProvider(name, cfg);
+        const miner = new SdkProviderMiner(name, null, cfg, this.inferenceLayer, this.evmAddress);
+        miner.provider = provider;
+        await miner.initialize();
+        this.miners.set(name, miner);
+      }
     }
 
-    if (this.config.casperUnified?.enabled) {
-      const layers = {
-        inference: this.inferenceLayer,
-        compute: this.config.casperUnified.config?.computeLayer || null,
-        bandwidth: this.config.casperUnified.config?.bandwidthLayer || null,
-      };
-      const { CasperUnifiedBridge } = await import('./CasperUnifiedBridge.js');
-      const miner = new CasperUnifiedBridge(this.config.casperUnified.config, layers);
-      await miner.initialize();
-      this.miners.set('casperUnified', miner);
-    }
-
-    if (this.config.botchain?.enabled) {
-      const miner = new BotchainEscrowBridge(this.config.botchain.config || {}, this.inferenceLayer);
-      await miner.initialize();
-      this.miners.set('botchain', miner);
-    }
-
-    // ─── Tasker Network Providers (via SdkProviderMiner wrapper) ───
-    // Each provider handles container mode internally (inline binary vs Docker)
-
-    if (this.config.golem?.enabled) {
-      const miner = new SdkProviderMiner('golem', GolemProvider, this.config.golem.config || {}, this.inferenceLayer, this.evmAddress);
-      await miner.initialize();
-      this.miners.set('golem', miner);
-    }
-
-    if (this.config.mysterium?.enabled) {
-      const miner = new SdkProviderMiner('mysterium', MysteriumProvider, this.config.mysterium.config || {}, this.inferenceLayer, this.evmAddress);
-      await miner.initialize();
-      this.miners.set('mysterium', miner);
-    }
-
-    if (this.config['anyone-protocol']?.enabled) {
-      const miner = new SdkProviderMiner('anyone-protocol', AnyoneProtocolProvider, this.config['anyone-protocol'].config || {}, this.inferenceLayer, this.evmAddress);
-      await miner.initialize();
-      this.miners.set('anyone-protocol', miner);
-    }
-
-    if (this.config.bttAi?.enabled) {
-      const miner = new SdkProviderMiner('btt-ai', BttAiMinerProvider, this.config.bttAi.config || {}, this.inferenceLayer, this.evmAddress);
-      await miner.initialize();
-      this.miners.set('btt-ai', miner);
-    }
-
+    // BTFS has its own complex provider class (daemon, RPC, on-chain jobs)
     if (this.config.btfs?.enabled) {
       const btfsConfig = { ...(this.config.btfs.config || {}) };
-      // Merge top-level btfs config (apiUrl, repoPath, rpcUrl, relayUrl, etc.)
       if (this._topConfig?.btfs) {
         Object.assign(btfsConfig, this._topConfig.btfs);
       }

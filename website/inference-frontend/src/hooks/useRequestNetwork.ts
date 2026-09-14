@@ -65,16 +65,17 @@ export async function payRequest(requestId: string, payerAddress: string, provid
   const request = await requestNetwork.fromRequestId(requestId);
   const data = request.getData();
   if (data.state === 'paid') return { status: 'already paid' };
-  // Build payment transaction via ethers browser provider
-  const ethers = await import('ethers');
-  const browserProvider = new ethers.BrowserProvider(provider);
-  const signer = await browserProvider.getSigner();
+  // Build payment transaction via viem wallet client
+  const { createWalletClient, custom, parseEther } = await import('viem');
+  const eip1193 = provider?.provider || provider?.getEthereumProvider?.() || provider?.getProvider?.() || provider;
+  const walletClient = createWalletClient({ transport: custom(eip1193) });
+  const [account] = await walletClient.getAddresses();
   const paymentNetwork = data.extensions?.find((e: any) => e?.id);
   if (!paymentNetwork?.values?.paymentAddress) throw new Error('No payment address');
-  const tx = await signer.sendTransaction({
+  const hash = await walletClient.sendTransaction({
+    account,
     to: paymentNetwork.values.paymentAddress,
-    value: data.expectedAmount,
+    value: parseEther(data.expectedAmount),
   });
-  await tx.wait();
-  return { status: 'paid', txHash: tx.hash };
+  return { status: 'paid', txHash: hash };
 }

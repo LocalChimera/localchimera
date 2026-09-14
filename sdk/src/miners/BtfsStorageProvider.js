@@ -24,8 +24,8 @@ import { BtfsClient } from '../storage/BtfsClient.js';
 import { Logger } from '../core/Logger.js';
 
 const logger = new Logger('BtfsStorageProvider');
-const DEFAULT_RPC_URL = 'https://node.testnet.casper.network/rpc';
-const DEFAULT_CHAIN_NAME = 'casper-test';
+const DEFAULT_RPC_URL = 'https://rpc.mainnet.chain.robinhood.com';
+const DEFAULT_CHAIN_NAME = 'robinhood';
 const DEFAULT_REPO = path.join(os.homedir(), '.btfs-chimera');
 const BTFS_IMAGE = 'bittorrent/go-btfs:latest';
 
@@ -84,15 +84,15 @@ export class BtfsStorageProvider {
     this.inProgressJobs = new Set();
     this.pollInterval = null;
 
-    this.rpcUrl = opts.rpcUrl || process.env.CASPER_RPC_URL || DEFAULT_RPC_URL;
-    this.chainName = opts.chainName || process.env.CASPER_CHAIN_NAME || DEFAULT_CHAIN_NAME;
+    this.rpcUrl = opts.rpcUrl || process.env.CHIMERA_RPC_URL || DEFAULT_RPC_URL;
+    this.chainName = opts.chainName || process.env.CHIMERA_CHAIN_NAME || DEFAULT_CHAIN_NAME;
     this.contracts = opts.contracts || { escrowVault: 'b8e8b7e087ec4ad7afcdc30460d39d5b6a8249875cd1e2da0716b89d710fda40' };
-    this.relayUrl = opts.relayUrl || process.env.CASPER_RELAY_URL || '';
-    this.relayToken = opts.relayToken || process.env.CASPER_RELAY_TOKEN || '';
-    this.providerAccountHash = opts.providerAccountHash || process.env.CASPER_PROVIDER_ACCOUNT_HASH || '';
+    this.relayUrl = opts.relayUrl || process.env.CHIMERA_RELAY_URL || '';
+    this.relayToken = opts.relayToken || process.env.CHIMERA_RELAY_TOKEN || '';
+    this.providerAccountHash = opts.providerAccountHash || process.env.CHIMERA_PROVIDER_ACCOUNT_HASH || '';
     this.signer = opts.signer || null;
 
-    if (opts.providerKeyPem || process.env.CASPER_PROVIDER_KEY_PEM || process.env.CASPER_PROVIDER_KEY_PEM_PATH) {
+    if (opts.providerKeyPem || process.env.CHIMERA_PROVIDER_KEY_PEM || process.env.CHIMERA_PROVIDER_KEY_PEM_PATH) {
       throw new Error('BtfsStorageProvider is relay/signer-only. Do not pass providerKeyPem.');
     }
   }
@@ -114,10 +114,10 @@ export class BtfsStorageProvider {
       }
     }
     if (!this.relayUrl && !this.signer) {
-      throw new Error('CASPER_RELAY_URL or a signer callback is required. The provider never holds the private key.');
+      throw new Error('CHIMERA_RELAY_URL or a signer callback is required. The provider never holds the private key.');
     }
     if (!this.providerAccountHash) {
-      throw new Error('CASPER_PROVIDER_ACCOUNT_HASH is required (public, safe to share).');
+      throw new Error('CHIMERA_PROVIDER_ACCOUNT_HASH is required (public, safe to share).');
     }
     logger.info('BTFS walletless storage provider initialized');
   }

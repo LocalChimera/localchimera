@@ -161,7 +161,7 @@ npx cap open android  # Android Studio → Generate Signed Bundle
 - **Standalone** — Each device is its own node. No InferenceRouter, no relay.
 - **Hardened** — Docker container runs as non-root with minimal deps.
 - **P2P** — Pear P2P swarm sync for wiki pages across devices.
-- **Mining** — BTT AI, Golem, Anyone Protocol, Mysterium, BTFS (walletless storage), Casper miners. Resources are paid for via the frontend using Web3Auth + Request Network; the protocol auto-converts payments to the resource's native token.
+- **Mining** — BTT AI, Golem, Anyone Protocol, Mysterium, BTFS (walletless storage), Sentinel, Spheron, Crust, Infernet miners. Resources are paid for via the frontend using Web3Auth + on-chain escrow; the protocol auto-converts payments to the resource's native token.
 - **Fleet** — Commander/worker orchestration for distributed tasks.
 
 ### New: Enhanced Inference & Security Modules
@@ -229,7 +229,7 @@ localchimera/
 │   │   ├── core/             # NodeManager, WalletManager, AuditLogger, ContentAddress, DeploymentLifecycle
 │   │   ├── inference/        # QVACInferenceLayer, ProofOfInference, InferenceQueue, PromptGuard, etc.
 │   │   ├── llmwiki/          # Upstream bridges (OtterWiki, OpenViking, LLMwiki)
-│   │   ├── miners/           # Casper, BTT AI, Golem, Anyone, Mysterium, BTFS
+│   │   ├── miners/           # BTT AI, Golem, Anyone, Mysterium, BTFS, Sentinel, Spheron, Crust, Infernet
 │   │   ├── p2p/              # Pear P2P networking + CapabilityManifest
 │   │   ├── web/              # HTTP server + API routes
 │   │   └── scheduler/        # TaskMonitor
@@ -242,7 +242,6 @@ localchimera/
 ├── inference-backend/        # Encrypted inference backend (FHE/SEAL experiments)
 ├── inference-config/         # Network deployment configs
 ├── contracts/                # EVM smart contracts
-├── contracts-casper/         # Casper Network smart contracts
 ├── providers/                # Provider setup/lifecycle scripts
 ├── scripts/                  # Automation, deployment, and utility scripts
 ├── docs/                     # Documentation (UPSTREAM.md, RELAY_COMPATIBILITY.md, etc.)
@@ -251,7 +250,7 @@ localchimera/
 ├── releases/                 # Release notes and artifacts
 ├── upstream/                 # Git submodules for upstream forks and dependencies
 ├── workers/                  # Background workers and cron jobs
-│   └── resource-provisioner/ # Request Network → CoW → Golem/BTFS/Mysterium/Anyone/BTT/Casper
+│   └── resource-provisioner/ # On-chain escrow → Golem/BTFS/Mysterium/Anyone/BTT/Sentinel/Spheron/Crust/Infernet
 ├── lib/                      # Foundry libraries (fhevm, forge-std, etc.)
 └── README.md
 ```
@@ -278,8 +277,8 @@ The decentralized application platform is built on the tasking networks and supp
 - **Edge Network** — CDN for static assets and media; `@edge/link` for control-plane messaging.
 - **Streamr** — real-time telemetry, scaling events, and deployment state events.
 - **Namesilo** — domain registration and DNS for user-owned domains.
-- **Casper** — on-chain escrow, payments, and identity.
-- **Request Network + CoW Protocol** — payment requests and token conversion.
+- **Robinhood Chain** — on-chain escrow, payments, and identity.
+- **On-chain escrow with ERC-8184 vouchers** — payment requests and token conversion.
 
 See `docs/PRODUCTION_TASKING_ARCHITECTURE.md` for the full design and deployment instructions.
 

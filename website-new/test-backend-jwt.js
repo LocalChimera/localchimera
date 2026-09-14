@@ -5,7 +5,7 @@
  * the backend `/api/web3auth-jwt` endpoint returns a valid JWT.
  */
 
-import { Wallet } from 'ethers';
+import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts';
 import { ed25519 } from '@noble/curves/ed25519';
 import bs58 from 'bs58';
 import { jwtVerify, createLocalJWKSet } from 'jose';
@@ -31,10 +31,11 @@ async function fetchJwt({ walletAddress, message, signature, chain }) {
 }
 
 async function testEvmJwt() {
-  const wallet = Wallet.createRandom();
-  const walletAddress = wallet.address;
+  const privateKey = generatePrivateKey();
+  const account = privateKeyToAccount(privateKey);
+  const walletAddress = account.address;
   const message = `Sign in to LocalChimera with ${walletAddress} at ${new Date().toISOString()}`;
-  const signature = await wallet.signMessage(message);
+  const signature = await account.signMessage({ message });
 
   const { jwt, sub } = await fetchJwt({ walletAddress, message, signature, chain: 'evm' });
   if (!jwt) throw new Error('No JWT returned for EVM');

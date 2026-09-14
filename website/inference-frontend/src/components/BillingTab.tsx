@@ -1,28 +1,12 @@
 import { useEffect, useState } from 'react';
-import { ethers } from 'ethers';
 import { Button } from './ui';
-import { depositWithWallet, withdrawWithWallet, getDepositBalance, getContractNamedKeys, queryDictionary } from '../casper-client';
-import { CONTRACTS } from '../casper-client';
-import { BOTCHAIN_CONTRACTS, BOTCHAIN_TESTNET_RPC, getSignerFromWeb3AuthWallet, switchToBotchain } from '../botchain';
-import { EscrowVaultAbi } from '../abis/EscrowVault';
-import { ComputeRegistryAbi } from '../abis/ComputeRegistry';
 import { CheckCircle, Server } from 'lucide-react';
 
-const CASPER_ESCROW = CONTRACTS.escrowVault;
-const BOTCHAIN_ESCROW = BOTCHAIN_CONTRACTS.escrowVault;
 
-type WalletMode = 'casper' | 'botchain' | 'evm' | null;
-
-export default function BillingTab({ walletMode, casperProvider, casperPublicKeyHex, botchainWallet, evmAddress }: {
-  walletMode: WalletMode;
-  casperProvider: any;
-  casperPublicKeyHex: string;
-  botchainWallet: any;
+export default function BillingTab({ evmAddress }: {
   evmAddress: string;
 }) {
   const [amount, setAmount] = useState('10');
-  const [method, setMethod] = useState<'casper' | 'botchain'>(walletMode === 'botchain' ? 'botchain' : 'casper');
-  const [target, setTarget] = useState(method === 'casper' ? CASPER_ESCROW : BOTCHAIN_ESCROW);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState<{ txHash: string; network: string } | null>(null);
@@ -30,61 +14,32 @@ export default function BillingTab({ walletMode, casperProvider, casperPublicKey
   const [hasNode, setHasNode] = useState(false);
   const [nodeCheckLoading, setNodeCheckLoading] = useState(false);
 
-  const connected = walletMode === 'casper' && !!casperProvider || walletMode === 'botchain' && !!botchainWallet;
+  const connected = !!evmAddress;
   const DISCOUNT_RATE = 0.10;
-  const walletAddress = walletMode === 'casper' ? casperPublicKeyHex : evmAddress;
+  const walletAddress = evmAddress;
 
   useEffect(() => {
     let cancelled = false;
-    if (method === 'casper' && casperPublicKeyHex) {
-      getDepositBalance(CASPER_ESCROW, casperPublicKeyHex.replace(/^account-hash-/, ''))
-        .then(bal => { if (!cancelled) setBalance(bal); })
-        .catch(() => { if (!cancelled) setBalance(null); });
-    } else if (method === 'botchain' && evmAddress) {
-      const provider = new ethers.JsonRpcProvider(BOTCHAIN_TESTNET_RPC);
-      const contract = new ethers.Contract(BOTCHAIN_ESCROW, EscrowVaultAbi, provider);
-      contract.getBalance(evmAddress)
-        .then((bal: bigint) => { if (!cancelled) setBalance(bal.toString()); })
+    if (evmAddress) {
+      fetch(`/api/billing/balance/${evmAddress}`)
+        .then(r => r.json())
+        .then(data => { if (!cancelled) setBalance(data.balance || '0'); })
         .catch(() => { if (!cancelled) setBalance(null); });
     } else {
       setBalance(null);
     }
     return () => { cancelled = true; };
-  }, [method, casperPublicKeyHex, evmAddress, success]);
+  }, [evmAddress, success]);
 
   useEffect(() => {
     let cancelled = false;
     setNodeCheckLoading(true);
     async function checkNode() {
       try {
-        if (walletMode === 'botchain' && evmAddress) {
-          const provider = new ethers.JsonRpcProvider(BOTCHAIN_TESTNET_RPC);
-          const registry = new ethers.Contract(BOTCHAIN_CONTRACTS.computeRegistry, ComputeRegistryAbi, provider);
-          const providerAddr = await registry.getProviderByAuthority(evmAddress);
-          if (providerAddr && providerAddr !== ethers.ZeroAddress) {
-            const status = await registry.getProviderStatus(providerAddr);
-            if (!cancelled) setHasNode(Number(status) === 1);
-          } else {
-            if (!cancelled) setHasNode(false);
-          }
-        } else if (walletMode === 'casper' && casperPublicKeyHex) {
-          const accountHash = casperPublicKeyHex.replace(/^account-hash-/, '');
-          const crKeys = await getContractNamedKeys(CONTRACTS.computeRegistry);
-          const statusUref = crKeys['providers_status'];
-          const listUref = crKeys['providers_list'];
-          if (statusUref && listUref) {
-            const list = await queryDictionary(listUref, 'list');
-            const providerHashes: string[] = Array.isArray(list) ? list as string[] : [];
-            const match = providerHashes.some((h: string) => h === accountHash || h === casperPublicKeyHex);
-            if (match) {
-              const status = await queryDictionary(statusUref, accountHash);
-              if (!cancelled) setHasNode(String(status) === '1');
-            } else {
-              if (!cancelled) setHasNode(false);
-            }
-          } else {
-            if (!cancelled) setHasNode(false);
-          }
+        if (evmAddress) {
+          const res = await fetch(`/api/billing/node-status/${evmAddress}`);
+          const data = await res.json().catch(() => ({}));
+          if (!cancelled) setHasNode(!!data.hasNode);
         } else {
           if (!cancelled) setHasNode(false);
         }
@@ -96,7 +51,7 @@ export default function BillingTab({ walletMode, casperProvider, casperPublicKey
     }
     checkNode();
     return () => { cancelled = true; };
-  }, [walletMode, casperPublicKeyHex, evmAddress]);
+  }, [evmAddress]);
 
   const handleAddFunds = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -113,40 +68,14 @@ export default function BillingTab({ walletMode, casperProvider, casperPublicKey
     }
     setLoading(true);
     try {
-      if (method === 'casper') {
-        if (!casperProvider || !casperPublicKeyHex) {
-          setError('Casper wallet is not connected.');
-          setLoading(false);
-          return;
-        }
-        const motes = BigInt(Math.round(value * 1e9)).toString();
-        const result = await depositWithWallet(casperProvider, casperPublicKeyHex, CASPER_ESCROW, motes);
-        if (result.error) throw new Error(result.error);
-        setSuccess({ txHash: result.deployHash, network: 'Casper Testnet' });
-        await fetch('/api/billing/fund', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ network: 'casper', amount: value, walletAddress: casperPublicKeyHex, target: CASPER_ESCROW, txHash: result.deployHash }),
-        });
-      } else {
-        if (!botchainWallet) {
-          setError('Botchain wallet is not connected.');
-          setLoading(false);
-          return;
-        }
-        await switchToBotchain(botchainWallet);
-        const signer = await getSignerFromWeb3AuthWallet(botchainWallet);
-        const contract = new ethers.Contract(BOTCHAIN_ESCROW, EscrowVaultAbi, signer);
-        const wei = ethers.parseEther(String(value));
-        const tx = await contract.deposit({ value: wei });
-        await tx.wait();
-        setSuccess({ txHash: tx.hash, network: 'Botchain Testnet' });
-        await fetch('/api/billing/fund', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ network: 'botchain', amount: value, walletAddress: evmAddress, target: BOTCHAIN_ESCROW, txHash: tx.hash }),
-        });
-      }
+      const res = await fetch('/api/billing/fund', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ amount: value, walletAddress: evmAddress }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Failed to add funds');
+      setSuccess({ txHash: data.txHash || '', network: 'EVM' });
     } catch (err: any) {
       setError(err.message || 'Failed to add funds');
     }
@@ -168,20 +97,14 @@ export default function BillingTab({ walletMode, casperProvider, casperPublicKey
     }
     setLoading(true);
     try {
-      if (method === 'casper') {
-        const motes = BigInt(Math.round(value * 1e9)).toString();
-        const result = await withdrawWithWallet(casperProvider, casperPublicKeyHex, CASPER_ESCROW, motes);
-        if (result.error) throw new Error(result.error);
-        setSuccess({ txHash: result.deployHash, network: 'Casper Testnet' });
-      } else {
-        await switchToBotchain(botchainWallet);
-        const signer = await getSignerFromWeb3AuthWallet(botchainWallet);
-        const contract = new ethers.Contract(BOTCHAIN_ESCROW, EscrowVaultAbi, signer);
-        const wei = ethers.parseEther(String(value));
-        const tx = await contract.withdraw(wei);
-        await tx.wait();
-        setSuccess({ txHash: tx.hash, network: 'Botchain Testnet' });
-      }
+      const res = await fetch('/api/billing/withdraw', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ amount: value, walletAddress: evmAddress }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Failed to withdraw funds');
+      setSuccess({ txHash: data.txHash || '', network: 'EVM' });
     } catch (err: any) {
       setError(err.message || 'Failed to withdraw funds');
     }
@@ -217,7 +140,7 @@ export default function BillingTab({ walletMode, casperProvider, casperPublicKey
             <p className="text-[12px] text-slate-500 mt-1.5">
               {hasNode
                 ? 'Your wallet has an active provider node. You receive a 10% discount on all workload costs. Funds deposited are charged at the discounted rate when paying for deployments, inference, storage, and compute.'
-                : 'Run a Chimera provider node to get a 10% discount on all workload costs. Register as a provider on the Casper or Botchain ComputeRegistry to activate your discount.'}
+                : 'Run a Chimera provider node to get a 10% discount on all workload costs. Register as a provider to activate your discount.'}
             </p>
           </div>
         )}
@@ -226,42 +149,6 @@ export default function BillingTab({ walletMode, casperProvider, casperPublicKey
       <div className="bg-white rounded-2xl shadow-sm p-6 text-slate-800">
         <h3 className="font-semibold text-slate-800 mb-4">Add funds</h3>
         <form onSubmit={handleAddFunds} className="space-y-4">
-          <div>
-            <label className="block text-[12px] font-semibold text-slate-600 mb-1">Target</label>
-            <input
-              type="text"
-              value={target}
-              readOnly
-              className="w-full px-3 py-2 rounded-[10px] border border-[#e5e5e5] text-[13px] font-mono bg-[#f5f5f7]"
-            />
-            {balance !== null && (
-              <p className="text-[11px] text-slate-500 mt-1">
-                Your deposit balance: <span className="font-mono text-slate-700">{(Number(balance) / 1e9).toFixed(4)} {method === 'casper' ? 'CSPR' : 'BOT'}</span>
-              </p>
-            )}
-            <p className="text-[11px] text-slate-500 mt-1">
-              Funds are sent to the protocol {method === 'casper' ? 'Casper' : 'Botchain'} escrow account. The protocol pulls from this account to fund compute, storage, bandwidth, and inference deployments.
-            </p>
-          </div>
-          <div>
-            <label className="block text-[12px] font-semibold text-slate-600 mb-1">Payment method</label>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => { setMethod('casper'); setTarget(CASPER_ESCROW); }}
-                className={`px-4 py-2 rounded-[10px] text-[13px] font-semibold border ${method === 'casper' ? 'bg-[#111111] text-white border-[#111111]' : 'border-[#e5e5e5] text-slate-700 hover:bg-[#f5f5f7]'}`}
-              >
-                Casper (CSPR)
-              </button>
-              <button
-                type="button"
-                onClick={() => { setMethod('botchain'); setTarget(BOTCHAIN_ESCROW); }}
-                className={`px-4 py-2 rounded-[10px] text-[13px] font-semibold border ${method === 'botchain' ? 'bg-[#111111] text-white border-[#111111]' : 'border-[#e5e5e5] text-slate-700 hover:bg-[#f5f5f7]'}`}
-              >
-                Botchain (BOT)
-              </button>
-            </div>
-          </div>
           <div>
             <label className="block text-[12px] font-semibold text-slate-600 mb-1">Amount</label>
             <input
@@ -272,16 +159,15 @@ export default function BillingTab({ walletMode, casperProvider, casperPublicKey
               onChange={(e) => setAmount(e.target.value)}
               className="w-full px-3 py-2 rounded-[10px] border border-[#e5e5e5] text-[13px]"
             />
-            <p className="text-[11px] text-slate-500 mt-1">{method === 'casper' ? 'Amount in CSPR.' : 'Amount in BOT.'}</p>
           </div>
           <div className="flex items-center justify-between text-[13px] text-slate-600 bg-[#f5f5f7] rounded-[10px] px-4 py-3">
             <span>Total to add</span>
-            <span className="font-semibold text-slate-800">{amount} {method === 'casper' ? 'CSPR' : 'BOT'}</span>
+            <span className="font-semibold text-slate-800">{amount}</span>
           </div>
           {hasNode && (
             <div className="flex items-center justify-between text-[13px] bg-emerald-50 rounded-[10px] px-4 py-3 border border-emerald-200">
               <span className="text-emerald-700">Effective cost (10% node discount)</span>
-              <span className="font-semibold text-emerald-700">{(Number(amount) * (1 - DISCOUNT_RATE)).toFixed(4)} {method === 'casper' ? 'CSPR' : 'BOT'}</span>
+              <span className="font-semibold text-emerald-700">{(Number(amount) * (1 - DISCOUNT_RATE)).toFixed(4)}</span>
             </div>
           )}
           <div className="flex items-center gap-2">

@@ -63,7 +63,7 @@ volunteer-map/frontend/js/chimera-fingerprint.js (browser SDK)
 
 ## Integration Points
 
-- **`server.js` `handleStart()`**: Generates device fingerprint before miners start, logs trust score, includes fingerprint in Casper registration `deviceProfile`, returns fingerprint in API response.
+- **`server.js` `handleStart()`**: Generates device fingerprint before miners start, logs trust score, includes fingerprint in escrow registration `deviceProfile`, returns fingerprint in API response.
 - **`server.js` `handleStatus()`**: Includes device fingerprint hash + trust score in status response.
 - **Desktop `Dashboard.tsx`**: Shows "Device Identity" panel with fingerprint hash and trust score badge.
 - **Web `WikiPage.jsx`**: Shows device fingerprint hash and trust score in miner node section.

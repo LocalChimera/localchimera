@@ -71,7 +71,7 @@ export class CommanderOrchestrator {
       lastSeen: Date.now(),
       online: true,
       evmAddress: meta.evmAddress || existing.evmAddress || '',
-      casperProvider: meta.casperProvider || existing.casperProvider || '',
+      providerHash: meta.providerHash || existing.providerHash || '',
       capacity: meta.capacity ?? existing.capacity ?? 1,
       inferenceUrl: meta.inferenceUrl || existing.inferenceUrl || `${url}/v1/chat/completions`,
       inferenceReady: meta.inferenceReady ?? existing.inferenceReady ?? false,

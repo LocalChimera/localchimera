@@ -1,0 +1,18 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["@cloudflare/workers-types"],
+    "paths": {
+      "@localchimera/sdk": ["../sdk/src/index.js"],
+      "@localchimera/browser-sdk": ["../browser-sdk/src/index.ts"]
+    }
+  },
+  "include": ["src", "dashboard/src", "tracker"]
+}

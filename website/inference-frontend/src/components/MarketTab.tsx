@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Card, Badge } from './ui';
 import { RefreshCw, Brain, HardDrive, Cpu, Wifi, TrendingUp } from 'lucide-react';
-import { CONTRACTS, getContractNamedKeys, queryDictionary } from '../casper-client';
 
 interface MarketTask {
   id: string;
@@ -23,49 +22,24 @@ export default function MarketTab() {
 
   const loadData = useCallback(async () => {
     setLoading(true);
-    const allTasks: MarketTask[] = [];
-
     try {
-      // Query escrow vault for all pending jobs — categorize by request_hash prefix
-      const evKeys = await getContractNamedKeys(CONTRACTS.escrowVault);
-      const jobsUref = evKeys['jobs_dict'];
-      const pendingUref = evKeys['pending_jobs'];
-      if (jobsUref && pendingUref) {
-        const pendingList = await queryDictionary(pendingUref, 'list');
-        const jobIds: string[] = Array.isArray(pendingList) ? pendingList as string[] : [];
-        for (const id of jobIds) {
-          const state = await queryDictionary(jobsUref, `${id}:state`);
-          if (state === null || state === undefined) continue;
-          const stateNum = Number(state);
-          // Show pending (0) and assigned (1) jobs
-          if (stateNum > 1) continue;
-          const statusStr = JOB_STATUS[String(stateNum)] || String(stateNum);
-          const amount = Number(await queryDictionary(jobsUref, `${id}:amount`) || '0');
-          const requestHash = String(await queryDictionary(jobsUref, `${id}:request_hash`) || '');
-
-          let market = 'Inference', marketIcon = 'brain', details = requestHash.slice(0, 40) || id;
-          if (requestHash.startsWith('STORAGE:')) {
-            market = 'Storage'; marketIcon = 'harddrive';
-            details = requestHash.slice(0, 40);
-          } else if (requestHash.startsWith('COMPUTE:')) {
-            market = 'Compute'; marketIcon = 'cpu';
-            details = requestHash.slice(0, 40);
-          } else if (requestHash.startsWith('BANDWIDTH:')) {
-            market = 'Bandwidth'; marketIcon = 'wifi';
-            details = requestHash.slice(0, 40);
-          }
-
-          allTasks.push({ id, market, marketIcon, amount, status: statusStr, details });
-        }
-      }
+      const res = await fetch('/api/market/tasks');
+      const data = await res.json().catch(() => ({}));
+      const allTasks: MarketTask[] = (data.tasks || []).map((t: any) => ({
+        id: t.id,
+        market: t.market || 'Inference',
+        marketIcon: t.marketIcon || 'brain',
+        amount: t.amount || 0,
+        status: t.status || 'pending',
+        details: t.details || '',
+      }));
+      allTasks.sort((a, b) => b.amount - a.amount);
+      setTasks(allTasks);
     } catch (e) {
       console.error('Failed to load market tasks:', e);
     } finally {
       setLoading(false);
     }
-
-    allTasks.sort((a, b) => b.amount - a.amount);
-    setTasks(allTasks);
   }, []);
 
   useEffect(() => {
@@ -114,7 +88,7 @@ export default function MarketTab() {
                 </div>
                 <div className="flex items-center gap-3">
                   <Badge variant={t.status === 'open' ? 'warning' : 'default'}>{t.status}</Badge>
-                  <span className="font-semibold text-[#00e5ff]">{(t.amount / 1e9).toFixed(4)} CSPR</span>
+                  <span className="font-semibold text-[#00e5ff]">{t.amount.toFixed(4)}</span>
                 </div>
               </div>
             ))}

@@ -1,0 +1,35 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-dark-900 text-white;
+  }
+}
+
+@layer components {
+  .card {
+    @apply bg-dark-800 rounded-lg border border-dark-700 p-6;
+  }
+  
+  .stat-card {
+    @apply bg-gradient-to-br from-dark-800 to-dark-700 rounded-lg border border-dark-600 p-6;
+  }
+  
+  .status-badge {
+    @apply px-3 py-1 rounded-full text-sm font-medium;
+  }
+  
+  .status-running {
+    @apply bg-green-500/20 text-green-400 border border-green-500/30;
+  }
+  
+  .status-stopped {
+    @apply bg-red-500/20 text-red-400 border border-red-500/30;
+  }
+  
+  .status-monitoring {
+    @apply bg-blue-500/20 text-blue-400 border border-blue-500/30;
+  }
+}

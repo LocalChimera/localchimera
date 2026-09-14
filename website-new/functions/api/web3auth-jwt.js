@@ -1,5 +1,5 @@
 import { SignJWT, importPKCS8, jwtVerify, createRemoteJWKSet } from 'jose';
-import { verifyMessage } from 'ethers';
+import { recoverAddress } from 'viem';
 import { ed25519 } from '@noble/curves/ed25519';
 import { utf8ToBytes } from '@noble/hashes/utils.js';
 
@@ -93,7 +93,7 @@ export async function onRequest(context) {
     }
   } else if (body.walletAddress && body.signature && body.message && body.chain === 'evm') {
     try {
-      const recovered = verifyMessage(body.message, body.signature);
+      const recovered = await recoverAddress({ message: body.message, signature: body.signature });
       if (recovered.toLowerCase() !== body.walletAddress.toLowerCase()) {
         throw new Error('Signature does not match wallet address');
       }

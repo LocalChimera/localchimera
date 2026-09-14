@@ -1,24 +1,14 @@
 import crypto from 'crypto';
 import { Logger } from '../core/Logger.js';
+import { sha256 } from 'multiformats/hashes/sha2';
+import { CID } from 'multiformats/cid';
+import { identity } from 'multiformats/hashes/identity';
 
 /**
  * ContentAddress — content-addressed verification for Chimera objects.
  *
- * Inspired by Hologram OS: every part of the system carries a name computed
- * from its own contents. Resolve any name, recompute it from the bytes, and
- * if they match you have verified that thing yourself, with no server and no
- * authority standing in between.
- *
- * This module provides:
- *   - contentHash(data): SHA-256 content hash (the "name" of the object)
- *   - verify(data, expectedHash): recompute and compare
- *   - ContentRegistry: maps content hashes to objects, enables dedup
- *   - MerkleProof: prove inclusion of a chunk in a larger document
- *
- * Used for:
- *   - Verifying wiki page integrity (detect tampering after P2P sync)
- *   - Verifying inference receipts (link output to exact model+prompt)
- *   - Verifying RAG document provenance (track source through chunking)
+ * Uses multiformats (MIT/Apache-2.0) for CID-based content addressing.
+ * Provides SHA-256 content hashes and CIDv1 identifiers for dedup.
  */
 
 export class ContentAddress {
@@ -36,6 +26,15 @@ export class ContentAddress {
   hash(data) {
     const serialized = this._serialize(data);
     return crypto.createHash(this.algorithm).update(serialized).digest('hex');
+  }
+
+  /**
+   * Compute a CIDv1 for any serializable data using SHA-256.
+   */
+  async cid(data) {
+    const serialized = this._serialize(data);
+    const hash = await sha256.digest(serialized);
+    return CID.create(1, identity.code, hash).toString();
   }
 
   /**

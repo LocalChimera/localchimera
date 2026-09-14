@@ -1,0 +1,776 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Chimera</title>
+  <meta name="description" content="Deploy and manage machine resource nodes across decentralized networks. Share compute, storage, bandwidth, and inference across Akash, Golem, Mysterium, Anyone, and Storj. EVM wallet payments via Web3Auth. Earn revenue while your hardware is idle.">
+  <meta name="keywords" content="decentralized compute, AI inference, Chimera, Akash Network, Golem, Mysterium, Anyone Protocol, Storj, EVM wallet, Web3Auth, edge AI, peer-to-peer AI, Chimera node, open source AI, tasking networks, GPU compute, CPU compute, bandwidth, storage">
+  <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1">
+  <link rel="canonical" href="https://localchimera.com/">
+  <link rel="icon" type="image/png" href="chimeralogo-header.png">
+  <link rel="sitemap" type="application/xml" title="Sitemap" href="/sitemap.xml">
+
+  <meta property="og:site_name" content="Chimera">
+  <meta property="og:title" content="Chimera — Decentralized Compute, Storage, Bandwidth & Inference">
+  <meta property="og:description" content="Deploy and manage machine resource nodes across decentralized networks. Share compute, storage, bandwidth, and inference across Akash, Golem, Mysterium, Anyone, and Storj. EVM wallet payments via Web3Auth.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://localchimera.com/">
+  <meta property="og:image" content="https://localchimera.com/banner2.png">
+  <meta property="og:image:alt" content="Chimera — Local compute, storage, bandwidth, and inference that earns when idle">
+
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:site" content="@LocalChimera">
+  <meta name="twitter:title" content="Chimera — Decentralized Compute, Storage, Bandwidth & Inference">
+  <meta name="twitter:description" content="Deploy and manage machine resource nodes across Akash, Golem, Mysterium, Anyone, and Storj. Share compute, storage, bandwidth, and inference. EVM wallet payments via Web3Auth.">
+  <meta name="twitter:image" content="https://localchimera.com/banner2.png">
+  <meta name="twitter:image:alt" content="Chimera — Local compute, storage, bandwidth, and inference that earns when idle">
+
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "Chimera",
+    "applicationCategory": "DeveloperApplication",
+    "operatingSystem": "Linux, macOS, Windows, Docker",
+    "offers": {"@type": "Offer", "price": "0", "priceCurrency": "USD"},
+    "softwareVersion": "1.0.0",
+    "description": "Deploy and manage machine resource nodes across decentralized networks. Share compute, storage, bandwidth, and inference across Akash, Golem, Mysterium, Anyone, and Storj. EVM wallet payments via Web3Auth.",
+    "url": "https://localchimera.com/",
+    "sameAs": ["https://github.com/LocalChimera/localchimera", "https://x.com/LocalChimera"],
+    "author": {"@type": "Organization", "name": "Chimera", "url": "https://localchimera.com/"},
+    "featureList": [
+      "Deploy across Akash, Golem, Mysterium, Anyone, and Storj",
+      "GPU, CPU, bandwidth, and storage resource markets",
+      "Embeddable scripts to monetize machine resources on any website",
+      "Privacy-friendly visitor analytics — pageviews, clicks, and referrers",
+      "EVM wallet payments via Web3Auth",
+      "Domain registration and referral system",
+      "SDL builder and YAML deployment editor",
+      "Hardened Docker container deployment"
+    ]
+  }
+  </script>
+
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "Organization",
+    "name": "Chimera",
+    "url": "https://localchimera.com/",
+    "logo": "https://localchimera.com/chimeralogo-header.png",
+    "sameAs": ["https://github.com/LocalChimera/localchimera", "https://x.com/LocalChimera"]
+  }
+  </script>
+
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "WebSite",
+    "url": "https://localchimera.com/",
+    "name": "Chimera",
+    "potentialAction": {
+      "@type": "SearchAction",
+      "target": {"@type": "EntryPoint", "urlTemplate": "https://localchimera.com/?q={search_term_string}"},
+      "query-input": "required name=search_term_string"
+    }
+  }
+  </script>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700;800&family=Inter:ital,wght@0,400;0,500;1,400&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+  <style>
+    :root {
+      --bg: #05070e;
+      --fg: #e2e8f4;
+      --card: #0b0e18;
+      --primary: #00d8ff;
+      --primary-fg: #05070e;
+      --muted: #111827;
+      --muted-fg: #6b7594;
+      --border: rgba(255,255,255,0.07);
+      --radius: 0.125rem;
+      --font-display: 'Outfit', system-ui, sans-serif;
+      --font-sans: 'Inter', system-ui, sans-serif;
+      --font-mono: 'JetBrains Mono', monospace;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; }
+    body { font-family: var(--font-sans); background: var(--bg); color: var(--fg); font-size: 16px; line-height: 1.5; overflow-x: hidden; }
+    a { text-decoration: none; color: inherit; }
+    img { max-width: 100%; display: block; }
+    .container { max-width: 80rem; margin: 0 auto; padding: 0 1.5rem; }
+    .flex { display: flex; }
+    .grid { display: grid; }
+    .hidden { display: none; }
+    .items-center { align-items: center; }
+    .justify-between { justify-content: space-between; }
+    .gap-2 { gap: 0.5rem; }
+    .gap-4 { gap: 1rem; }
+    .gap-8 { gap: 2rem; }
+    .relative { position: relative; }
+    .absolute { position: absolute; }
+    .fixed { position: fixed; }
+    .inset-0 { top: 0; left: 0; right: 0; bottom: 0; }
+    .z-50 { z-index: 50; }
+    .text-xs { font-size: 0.75rem; }
+    .text-sm { font-size: 0.875rem; }
+    .text-lg { font-size: 1.125rem; }
+    .text-xl { font-size: 1.25rem; }
+    .text-4xl { font-size: 2.25rem; }
+    .text-5xl { font-size: 3rem; }
+    .text-7xl { font-size: 4.5rem; }
+    .font-medium { font-weight: 500; }
+    .font-semibold { font-weight: 600; }
+    .font-bold { font-weight: 700; }
+    .tracking-tight { letter-spacing: -0.02em; }
+    .tracking-tighter { letter-spacing: -0.04em; }
+    .tracking-wide { letter-spacing: 0.05em; }
+    .tracking-widest { letter-spacing: 0.1em; }
+    .uppercase { text-transform: uppercase; }
+    .text-center { text-align: center; }
+    .text-primary { color: var(--primary); }
+    .text-muted { color: var(--muted-fg); }
+    .bg-primary { background: var(--primary); }
+    .bg-card { background: var(--card); }
+    .bg-muted { background: var(--muted); }
+    .bg-bg { background: var(--bg); }
+    .border { border: 1px solid var(--border); }
+    .border-b { border-bottom: 1px solid var(--border); }
+    .border-t { border-top: 1px solid var(--border); }
+    .rounded-sm { border-radius: var(--radius); }
+    .rounded-full { border-radius: 9999px; }
+    .px-3 { padding: 0.375rem 0.75rem; }
+    .px-4 { padding: 0.75rem 1rem; }
+    .px-6 { padding: 0 1.5rem; }
+    .py-2 { padding: 0.5rem 0; }
+    .py-3 { padding: 0.75rem 0; }
+    .py-28 { padding: 7rem 0; }
+    .py-16 { padding: 4rem 0; }
+    .p-6 { padding: 1.5rem; }
+    .p-8 { padding: 2rem; }
+    .p-10 { padding: 2.5rem; }
+    .mb-3 { margin-bottom: 0.75rem; }
+    .mb-4 { margin-bottom: 1rem; }
+    .mb-7 { margin-bottom: 1.75rem; }
+    .mb-8 { margin-bottom: 2rem; }
+    .mb-10 { margin-bottom: 2.5rem; }
+    .mb-16 { margin-bottom: 4rem; }
+    .mb-20 { margin-bottom: 5rem; }
+    .mt-6 { margin-top: 1.5rem; }
+    .ml-3 { margin-left: 0.75rem; }
+    .max-w-xs { max-width: 20rem; }
+    .max-w-420 { max-width: 420px; }
+    .w-7 { width: 1.75rem; }
+    .h-7 { height: 1.75rem; }
+    .w-8 { width: 2rem; }
+    .h-8 { height: 2rem; }
+    .w-9 { width: 2.25rem; }
+    .h-9 { height: 2.25rem; }
+    .w-2-5 { width: 0.625rem; }
+    .h-2-5 { height: 0.625rem; }
+    .w-20 { width: 5rem; }
+    .h-px { height: 1px; }
+    .w-4 { width: 1rem; }
+    .h-4 { height: 1rem; }
+    .w-5 { width: 1.25rem; }
+    .h-5 { height: 1.25rem; }
+    .flex-1 { flex: 1; }
+    .shrink-0 { flex-shrink: 0; }
+    .object-contain { object-fit: contain; }
+    .overflow-hidden { overflow: hidden; }
+    .pointer-events-none { pointer-events: none; }
+    .tabular-nums { font-variant-numeric: tabular-nums; }
+    .leading-relaxed { line-height: 1.625; }
+    .cursor-pointer { cursor: pointer; }
+    .cursor-default { cursor: default; }
+    .font-display { font-family: var(--font-display); }
+    .font-mono { font-family: var(--font-mono); }
+    .transition { transition: all 0.2s ease; }
+    .transition-all { transition: all 0.3s ease; }
+
+    header { position: fixed; top: 0; left: 0; right: 0; z-index: 50; padding: 0.75rem 0; transition: all 0.3s ease; }
+    header.scrolled { background: rgba(5,7,14,0.85); backdrop-filter: blur(24px); border-bottom: 1px solid var(--border); }
+    header .container { max-width: 80rem; margin: 0 auto; padding: 0 1rem; }
+    header nav { display: flex; align-items: center; justify-content: space-between; height: 3rem; background: rgba(11,14,24,0.75); border: 1px solid rgba(0,216,255,0.15); border-radius: 9999px; padding: 0.25rem 0.4rem 0.25rem 0.75rem; box-shadow: 0 4px 30px rgba(0,0,0,0.25); }
+    .nav-group { display: flex; align-items: center; gap: 0.25rem; background: rgba(0,0,0,0.25); border-radius: 9999px; padding: 0.25rem; }
+    .nav-link { font-size: 0.8125rem; color: var(--muted-fg); font-family: var(--font-mono); letter-spacing: 0.02em; transition: all 0.2s ease; padding: 0.45rem 0.85rem; border-radius: 9999px; }
+    .nav-link:hover { color: var(--fg); background: rgba(255,255,255,0.05); }
+    .logo { display: flex; align-items: center; gap: 0.5rem; padding: 0 0.5rem 0 0; }
+    .logo img { width: 1.5rem; height: 1.5rem; }
+    .logo span { font-size: 0.9375rem; font-weight: 700; letter-spacing: -0.02em; font-family: var(--font-display); }
+    .btn-primary { display: inline-flex; align-items: center; gap: 0.5rem; background: var(--primary); color: var(--primary-fg); font-size: 0.8125rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 9999px; font-family: var(--font-mono); letter-spacing: 0.05em; transition: all 0.3s ease; }
+    .btn-primary:hover { background: rgba(0,216,255,0.9); box-shadow: 0 0 20px rgba(0,216,255,0.25); }
+    .btn-ghost { display: inline-flex; align-items: center; gap: 0.5rem; color: var(--fg); font-size: 0.8125rem; font-weight: 500; padding: 0.5rem 1rem; border-radius: 9999px; font-family: var(--font-mono); letter-spacing: 0.05em; border: 1px solid rgba(0,216,255,0.25); background: rgba(0,216,255,0.05); transition: all 0.3s ease; }
+    .btn-ghost:hover { background: rgba(0,216,255,0.12); border-color: rgba(0,216,255,0.4); box-shadow: 0 0 15px rgba(0,216,255,0.15); }
+    .btn-secondary { display: inline-flex; align-items: center; gap: 0.5rem; color: var(--muted-fg); font-size: 0.875rem; border: 1px solid var(--border); padding: 0.75rem 1.5rem; border-radius: var(--radius); font-family: var(--font-mono); letter-spacing: 0.05em; transition: all 0.2s ease; }
+    .btn-secondary:hover { color: var(--fg); border-color: rgba(0,216,255,0.3); }
+    .mobile-menu-btn { display: none; background: none; border: none; color: var(--fg); cursor: pointer; padding: 0.5rem; border-radius: 9999px; transition: background 0.2s ease; }
+    .mobile-menu-btn:hover { background: rgba(255,255,255,0.04); }
+
+    .hero { min-height: 100vh; position: relative; display: flex; flex-direction: column; justify-content: center; padding-top: 4rem; overflow: hidden; }
+    .hero-grid { position: absolute; inset: 0; background-image: linear-gradient(rgba(0,216,255,0.04) 1px, transparent 1px), linear-gradient(90deg, rgba(0,216,255,0.04) 1px, transparent 1px); background-size: 60px 60px; pointer-events: none; }
+    .hero-glow { position: absolute; border-radius: 9999px; pointer-events: none; filter: blur(120px); }
+    .hero-glow-sm { position: absolute; border-radius: 9999px; pointer-events: none; filter: blur(80px); }
+    .hero-content { display: grid; grid-template-columns: 1fr; gap: 3rem; align-items: center; padding: 7rem 0; }
+    .hero-badge { display: inline-flex; align-items: center; gap: 0.625rem; border: 1px solid rgba(0,216,255,0.25); background: rgba(0,216,255,0.05); color: var(--primary); font-size: 0.75rem; padding: 0.375rem 0.75rem; border-radius: var(--radius); font-family: var(--font-mono); letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 2.5rem; }
+    .hero h1 { font-size: 3rem; line-height: 0.93; letter-spacing: -0.04em; margin-bottom: 1.75rem; }
+    .hero p { font-size: 1.125rem; color: var(--muted-fg); line-height: 1.625; margin-bottom: 2.5rem; max-width: 420px; }
+    .hero-actions { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
+    .terminal { border: 1px solid var(--border); background: var(--card); border-radius: var(--radius); overflow: hidden; box-shadow: 0 0 60px rgba(0,216,255,0.06); }
+    .terminal-header { display: flex; align-items: center; gap: 0.5rem; padding: 0.75rem 1rem; border-bottom: 1px solid var(--border); background: rgba(17,24,39,0.4); }
+    .terminal-dot { width: 0.625rem; height: 0.625rem; border-radius: 9999px; }
+    .terminal-body { padding: 1.5rem; font-family: var(--font-mono); }
+    .terminal-row { display: flex; justify-content: space-between; align-items: center; font-size: 0.875rem; margin-bottom: 0.75rem; }
+    .terminal-row:last-child { margin-bottom: 0; }
+    .terminal-row .label { color: var(--muted-fg); }
+    .progress-bar { flex: 1; height: 1px; background: var(--border); position: relative; }
+    .progress-bar .fill { position: absolute; top: 0; left: 0; height: 100%; background: var(--primary); }
+    .marquee-wrap { border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); background: rgba(11,14,24,0.6); padding: 0.875rem 0; overflow: hidden; }
+    .animate-marquee { display: flex; gap: 4rem; animation: marquee 45s linear infinite; white-space: nowrap; }
+    .marquee-item { display: inline-flex; align-items: center; gap: 1rem; font-size: 0.75rem; color: var(--muted-fg); font-family: var(--font-mono); letter-spacing: 0.1em; text-transform: uppercase; }
+
+    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
+    @keyframes marquee { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+    .animate-pulse { animation: pulse 2s cubic-bezier(0.4,0,0.6,1) infinite; }
+
+    .section-label { font-size: 0.75rem; color: var(--primary); font-family: var(--font-mono); letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 1rem; }
+    .section-title { font-size: 2.25rem; font-weight: 700; letter-spacing: -0.02em; line-height: 1.1; margin-bottom: 1rem; }
+    .section-title br { display: block; }
+
+    .grid-px { display: grid; gap: 1px; background: var(--border); }
+    .card { background: var(--bg); transition: background 0.2s ease; }
+    .card:hover { background: var(--card); }
+    .card-icon { width: 2.25rem; height: 2.25rem; border: 1px solid rgba(0,216,255,0.2); border-radius: var(--radius); display: flex; align-items: center; justify-content: center; transition: all 0.3s ease; }
+    .card-icon svg { width: 1rem; height: 1rem; color: var(--primary); }
+    .card:hover .card-icon { border-color: rgba(0,216,255,0.5); box-shadow: 0 0 20px rgba(0,240,192,0.12); }
+    .card:hover .card-title { color: var(--primary); }
+    .card-title { font-size: 1.5rem; font-weight: 700; margin-bottom: 0.75rem; transition: color 0.2s ease; }
+    .card-desc { font-size: 0.875rem; color: var(--muted-fg); line-height: 1.625; }
+    .card-arrow { display: inline-flex; align-items: center; gap: 0.375rem; color: var(--primary); font-size: 0.75rem; font-family: var(--font-mono); margin-top: 1.5rem; opacity: 0; transform: translateX(-0.25rem); transition: all 0.2s ease; }
+    .card:hover .card-arrow { opacity: 1; transform: translateX(0); }
+    .card-tag { font-size: 0.75rem; color: var(--muted-fg); font-family: var(--font-mono); letter-spacing: 0.1em; text-transform: uppercase; }
+    .card-num { font-size: 0.75rem; color: rgba(0,216,255,0.4); font-family: var(--font-mono); margin-bottom: 1.25rem; letter-spacing: 0.1em; }
+
+    .checklist-item { display: flex; align-items: center; gap: 0.75rem; font-size: 0.875rem; margin-bottom: 0.75rem; }
+    .checklist-item .check { color: var(--primary); font-family: var(--font-mono); }
+    .checklist-item .text { color: var(--muted-fg); }
+    .contracts-table { width: 100%; font-size: 0.75rem; font-family: var(--font-mono); border-collapse: collapse; }
+    .contracts-table th, .contracts-table td { padding: 0.75rem 1rem; border-bottom: 1px solid var(--border); }
+    .contracts-table th { color: var(--muted-fg); font-weight: 400; text-align: left; }
+    .contracts-table td { color: var(--fg); }
+    .contracts-table td.center { text-align: center; }
+    .contracts-table td.tech { color: var(--muted-fg); }
+    .contracts-table tr:last-child th, .contracts-table tr:last-child td { border-bottom: none; }
+    .contracts-table tr:hover { background: rgba(17,24,39,0.3); }
+
+    .step-num { font-size: 4.5rem; font-weight: 700; color: rgba(0,216,255,0.08); line-height: 1; margin-bottom: 1.25rem; }
+
+    .platform-card { background: var(--bg); padding: 1.25rem; display: flex; flex-direction: column; gap: 0.25rem; transition: all 0.2s ease; cursor: pointer; border: none; text-align: left; color: inherit; }
+    .platform-card:hover { background: rgba(17,24,39,0.4); }
+    .platform-card:hover .platform-download { color: var(--primary); background: rgba(0,216,255,0.08); border-color: rgba(0,216,255,0.25); }
+    .platform-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.75rem; }
+    .platform-name { font-size: 0.9375rem; font-weight: 600; font-family: var(--font-display); }
+    .platform-download { color: var(--muted-fg); transition: all 0.2s ease; display: flex; align-items: center; justify-content: center; width: 1.75rem; height: 1.75rem; border: 1px solid var(--border); border-radius: var(--radius); }
+    .platform-download svg { width: 0.875rem; height: 0.875rem; }
+    .platform-format { font-size: 0.75rem; color: var(--muted-fg); font-family: var(--font-mono); }
+
+    .sdk-card { background: var(--bg); padding: 2.5rem; transition: background 0.2s ease; }
+    .sdk-card:hover { background: var(--card); }
+    .sdk-card:hover .sdk-link { color: var(--primary); }
+    .sdk-card.primary-border { border: 1px solid rgba(0,216,255,0.2); }
+    .sdk-tag { font-size: 0.75rem; font-family: var(--font-mono); letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 1.25rem; }
+    .sdk-link { display: inline-flex; align-items: center; gap: 0.5rem; font-size: 0.75rem; font-family: var(--font-mono); color: var(--primary); transition: gap 0.2s ease; }
+    .sdk-link.muted { color: var(--muted-fg); }
+    .sdk-card:hover .sdk-link.muted { color: var(--primary); }
+    .sdk-link svg { width: 0.75rem; height: 0.75rem; }
+
+    footer .footer-grid { display: grid; grid-template-columns: 1fr; gap: 2.5rem; margin-bottom: 3.5rem; }
+    footer .footer-brand { display: flex; flex-direction: column; gap: 1rem; }
+    footer .footer-brand p { max-width: 22rem; font-size: 0.875rem; color: var(--muted-fg); line-height: 1.625; }
+    footer .footer-links { display: grid; grid-template-columns: 1fr; gap: 2rem; }
+    footer .footer-col { display: flex; flex-direction: column; gap: 0.75rem; }
+    footer .footer-col h4 { font-size: 0.75rem; color: var(--primary); font-family: var(--font-mono); letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 0.25rem; }
+    footer .footer-col a { font-size: 0.875rem; color: var(--muted-fg); transition: color 0.2s ease; }
+    footer .footer-col a:hover { color: var(--fg); }
+    footer .socials { display: flex; align-items: center; gap: 0.75rem; }
+    footer .socials a { display: flex; align-items: center; justify-content: center; width: 2.25rem; height: 2.25rem; border: 1px solid var(--border); border-radius: var(--radius); color: var(--muted-fg); transition: all 0.2s ease; }
+    footer .socials a:hover { color: var(--primary); border-color: rgba(0,216,255,0.3); background: rgba(0,216,255,0.05); }
+    footer .socials a svg { width: 1rem; height: 1rem; }
+    .footer-stack { display: flex; flex-wrap: wrap; gap: 1.5rem; }
+    .footer-stack span { font-size: 0.75rem; color: rgba(107,117,148,0.3); font-family: var(--font-mono); }
+
+    @media (min-width: 768px) {
+      .md-flex { display: flex; }
+      .md-flex-row { flex-direction: row; }
+      .md-items-center { align-items: center; }
+      .md-grid-2 { grid-template-columns: repeat(2, 1fr); }
+      .md-grid-3 { grid-template-columns: repeat(3, 1fr); }
+      .md-block { display: block; }
+      .hero-content { grid-template-columns: repeat(2, 1fr); }
+      .hero h1 { font-size: 4.5rem; }
+      .section-title { font-size: 3rem; }
+      .mobile-menu { display: none !important; }
+      footer .footer-grid { grid-template-columns: 1.5fr 1fr; }
+      footer .footer-links { grid-template-columns: repeat(2, 1fr); }
+    }
+    @media (min-width: 1024px) {
+      .hero h1 { font-size: 5.5rem; }
+    }
+    @media (max-width: 767px) {
+      .mobile-menu-btn { display: block; }
+      .desktop-nav, .desktop-cta { display: none; }
+      .hero-content { padding: 4rem 0; }
+      .hero h1 { font-size: 2.25rem; }
+      .section-title { font-size: 1.875rem; }
+    }
+  </style>
+</head>
+<body>
+
+  <header id="header">
+    <div class="container">
+      <nav>
+        <a href="/" class="logo">
+          <img src="chimeralogo-header.png" alt="Chimera logo">
+          <span>Chimera</span>
+        </a>
+        <div class="desktop-nav nav-group">
+          <a href="/#download" class="nav-link js-download-trigger" data-download="auto">Download</a>
+          <a href="/apps" class="nav-link">Maker</a>
+          <a href="/example" class="nav-link">Example</a>
+          <a href="/dashboard" class="nav-link">Earn</a>
+        </div>
+        <a href="/app" class="desktop-cta btn-ghost">
+          Order
+        </a>
+        <button class="mobile-menu-btn" id="menu-btn" aria-label="Toggle menu">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+        </button>
+      </nav>
+    </div>
+    <div class="mobile-menu hidden" id="mobile-menu" style="background: rgba(11,14,24,0.95); backdrop-filter: blur(24px); border: 1px solid var(--border); border-radius: var(--radius); margin: 0.5rem 1rem; padding: 1rem; flex-direction: column; gap: 0.75rem;">
+      <a href="/#download" class="nav-link js-download-trigger" data-download="auto">Download</a>
+      <a href="/apps" class="nav-link">Maker</a>
+      <a href="/example" class="nav-link">Example</a>
+      <a href="/dashboard" class="nav-link">Earn</a>
+      <a href="/app" class="btn-primary" style="width: fit-content; margin-top: 0.5rem;">
+        Order
+      </a>
+    </div>
+  </header>
+
+  <section class="hero">
+    <div class="hero-grid"></div>
+    <div class="hero-glow w-500 h-500 bg-primary-8" style="top: 30%; left: 20%; opacity: 0.08;"></div>
+    <div class="hero-glow-sm w-300 h-300 bg-primary-4" style="bottom: 20%; right: 15%; opacity: 0.04;"></div>
+
+    <div class="container relative hero-content">
+      <div>
+        <div class="hero-badge">
+          <span class="w-2-5 h-2-5 rounded-full bg-primary animate-pulse"></span>
+          Open Source · Permissionless
+        </div>
+        <h1 class="font-display">
+          Turn idle hardware<br>
+          <span class="text-primary">into income.</span>
+        </h1>
+        <p>Your computer's spare power is worth money. Chimera shares it with people who need it — compute, storage, bandwidth, AI — and pays you for it. No technical setup required.</p>
+        <div class="hero-actions">
+          <a href="#download" class="btn-primary js-download-trigger" data-download="auto" style="padding: 0.75rem 1.5rem;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            Download Node
+          </a>
+          <a href="#how" class="btn-secondary">
+            How it works
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+          </a>
+        </div>
+      </div>
+
+      <div class="hidden md-block">
+        <div class="terminal">
+          <div class="terminal-header">
+            <span class="terminal-dot" style="background: rgba(239,68,68,0.5);"></span>
+            <span class="terminal-dot" style="background: rgba(234,179,8,0.5);"></span>
+            <span class="terminal-dot" style="background: rgba(34,197,94,0.5);"></span>
+            <span class="ml-3 text-xs text-muted font-mono">chimera — node status</span>
+          </div>
+          <div class="terminal-body">
+            <div class="terminal-row"><span class="label">status</span><span class="text-primary flex items-center gap-1-5"><span class="w-2-5 h-2-5 rounded-full bg-primary animate-pulse"></span>online</span></div>
+            <div class="terminal-row"><span class="label">active nodes</span><span class="text-foreground tabular-nums" id="stat-nodes">3,041</span></div>
+            <div class="terminal-row"><span class="label">jobs completed</span><span class="text-foreground tabular-nums" id="stat-jobs">14,823</span></div>
+            <div class="terminal-row"><span class="label">total earned (ETH)</span><span class="text-primary tabular-nums" id="stat-earned">204,812.47</span></div>
+            <div style="border-top: 1px solid var(--border); padding-top: 1rem; margin-top: 0.5rem;">
+              <div class="flex items-center justify-between text-xs gap-3 mb-3"><span class="text-muted" style="width: 5rem; flex-shrink: 0;">compute</span><div class="progress-bar"><div class="fill" style="width: 68%;"></div></div><span class="text-foreground w-8 text-right tabular-nums">68%</span></div>
+              <div class="flex items-center justify-between text-xs gap-3 mb-3"><span class="text-muted" style="width: 5rem; flex-shrink: 0;">storage</span><div class="progress-bar"><div class="fill" style="width: 42%;"></div></div><span class="text-foreground w-8 text-right tabular-nums">42%</span></div>
+              <div class="flex items-center justify-between text-xs gap-3 mb-3"><span class="text-muted" style="width: 5rem; flex-shrink: 0;">bandwidth</span><div class="progress-bar"><div class="fill" style="width: 87%;"></div></div><span class="text-foreground w-8 text-right tabular-nums">87%</span></div>
+              <div class="flex items-center justify-between text-xs gap-3"><span class="text-muted" style="width: 5rem; flex-shrink: 0;">inference</span><div class="progress-bar"><div class="fill" style="width: 31%;"></div></div><span class="text-foreground w-8 text-right tabular-nums">31%</span></div>
+            </div>
+            <div style="border-top: 1px solid var(--border); padding-top: 0.75rem; margin-top: 0.75rem; font-size: 0.75rem; color: var(--muted-fg);"><span class="text-primary">$</span> awaiting next job assignment<span class="animate-pulse ml-0-5">▊</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="marquee-wrap">
+      <div class="animate-marquee" id="marquee">
+        <span class="marquee-item">Akash Network<span style="color: rgba(0,216,255,0.4);">◈</span></span>
+        <span class="marquee-item">Golem<span style="color: rgba(0,216,255,0.4);">◈</span></span>
+        <span class="marquee-item">Mysterium<span style="color: rgba(0,216,255,0.4);">◈</span></span>
+        <span class="marquee-item">Anyone Protocol<span style="color: rgba(0,216,255,0.4);">◈</span></span>
+        <span class="marquee-item">Storj<span style="color: rgba(0,216,255,0.4);">◈</span></span>
+        <span class="marquee-item">Web3Auth<span style="color: rgba(0,216,255,0.4);">◈</span></span>
+        <span class="marquee-item">EVM<span style="color: rgba(0,216,255,0.4);">◈</span></span>
+        <span class="marquee-item">Docker<span style="color: rgba(0,216,255,0.4);">◈</span></span>
+        <span class="marquee-item">SDL<span style="color: rgba(0,216,255,0.4);">◈</span></span>
+        <span class="marquee-item">Embeddable Scripts<span style="color: rgba(0,216,255,0.4);">◈</span></span>
+        <span class="marquee-item">Analytics<span style="color: rgba(0,216,255,0.4);">◈</span></span>
+        <span class="marquee-item">GPU Compute<span style="color: rgba(0,216,255,0.4);">◈</span></span>
+        <span class="marquee-item">Bandwidth<span style="color: rgba(0,216,255,0.4);">◈</span></span>
+        <span class="marquee-item">Storage<span style="color: rgba(0,216,255,0.4);">◈</span></span>
+      </div>
+    </div>
+  </section>
+
+  <section class="py-28">
+    <div class="container">
+      <div class="mb-16">
+        <div class="section-label">Resource Markets</div>
+        <h2 class="section-title font-display">Four ways to earn.<br>One node.</h2>
+      </div>
+      <div class="grid-px grid-cols-2 md-grid-2">
+        <div class="card p-8 md:p-10">
+          <div class="market-header flex items-start justify-between mb-7">
+            <div class="card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><line x1="9" y1="1" x2="9" y2="4"/><line x1="15" y1="1" x2="15" y2="4"/><line x1="9" y1="20" x2="9" y2="23"/><line x1="15" y1="20" x2="15" y2="23"/><line x1="20" y1="9" x2="23" y2="9"/><line x1="20" y1="15" x2="23" y2="15"/><line x1="1" y1="9" x2="4" y2="9"/><line x1="1" y1="15" x2="4" y2="15"/></svg></div>
+            <span class="card-tag">AKASH · GOLEM</span>
+          </div>
+          <h3 class="card-title font-display">Compute</h3>
+          <p class="card-desc">Rent out your CPU and GPU to run other people's apps and AI workloads. You get paid for the processing power you're not using.</p>
+          <div class="card-arrow">View market <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></div>
+        </div>
+        <div class="card p-8 md:p-10">
+          <div class="market-header flex items-start justify-between mb-7">
+            <div class="card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="12" x2="2" y2="12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/><line x1="6" y1="16" x2="6.01" y2="16"/><line x1="10" y1="16" x2="10.01" y2="16"/></svg></div>
+            <span class="card-tag">STORJ</span>
+          </div>
+          <h3 class="card-title font-display">Storage</h3>
+          <p class="card-desc">Rent out your unused disk space. Files are encrypted and split across a global network, so no one — including you — can see what's stored.</p>
+          <div class="card-arrow">View market <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></div>
+        </div>
+        <div class="card p-8 md:p-10">
+          <div class="market-header flex items-start justify-between mb-7">
+            <div class="card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4.9 19.1C1 15.2 1 8.8 4.9 4.9"/><path d="M7.8 16.2c-2.3-2.3-2.3-6.1 0-8.5"/><circle cx="12" cy="12" r="2"/><path d="M16.2 7.8c2.3 2.3 2.3 6.1 0 8.5"/><path d="M19.1 4.9C23 8.8 23 15.1 19.1 19"/></svg></div>
+            <span class="card-tag">MYSTERIUM · ANYONE</span>
+          </div>
+          <h3 class="card-title font-display">Bandwidth</h3>
+          <p class="card-desc">Share your unused internet bandwidth. Your connection helps route traffic for others, and you earn for every byte relayed.</p>
+          <div class="card-arrow">View market <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></div>
+        </div>
+        <div class="card p-8 md:p-10">
+          <div class="market-header flex items-start justify-between mb-7">
+            <div class="card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"/><path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"/><path d="M15 13a4.5 4.5 0 0 1-3-4 4.5 4.5 0 0 1-3 4"/><path d="M17.599 6.5a3 3 0 0 0 .399-1.375"/><path d="M6.003 5.125A3 3 0 0 0 6.401 6.5"/><path d="M3.477 10.896a4 4 0 0 1 .585-.396"/><path d="M19.938 10.5a4 4 0 0 1 .585.396"/><path d="M6 18a4 4 0 0 1-1.97-3.465"/><path d="M19.97 14.535A4 4 0 0 1 18 18"/></svg></div>
+            <span class="card-tag">GPU · AKASH · GOLEM</span>
+          </div>
+          <h3 class="card-title font-display">AI Inference</h3>
+          <p class="card-desc">Got a GPU? Run AI models for other people and get paid per request. No AI expertise needed — Chimera handles the rest.</p>
+          <div class="card-arrow">View market <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="py-28 border-t">
+    <div class="container">
+      <div class="mb-16">
+        <div class="section-label">Capabilities</div>
+        <h2 class="section-title font-display">Everything you need.<br>Nothing you don't.</h2>
+      </div>
+      <div class="grid-px md-grid-3">
+        <div class="card p-8 feature-card">
+          <div class="card-num">01</div>
+          <h3 class="card-title font-display" style="font-size: 1.1rem;">One-Click Deploy</h3>
+          <p class="card-desc">Deploy to five different networks from a single dashboard. No need to learn each one separately — Chimera handles the setup.</p>
+        </div>
+        <div class="card p-8 feature-card">
+          <div class="card-num">02</div>
+          <h3 class="card-title font-display" style="font-size: 1.1rem;">Visual Deploy Builder</h3>
+          <p class="card-desc">Point-and-click builder for configuring CPU, GPU, memory, and storage. Prefer code? A YAML editor is there too.</p>
+        </div>
+        <div class="card p-8 feature-card">
+          <div class="card-num">03</div>
+          <h3 class="card-title font-display" style="font-size: 1.1rem;">Live Network Map</h3>
+          <p class="card-desc">See every provider on the network on a live map. Filter by resource type to find exactly what you need, wherever it is.</p>
+        </div>
+        <div class="card p-8 feature-card">
+          <div class="card-num">04</div>
+          <h3 class="card-title font-display" style="font-size: 1.1rem;">Simple Wallet Login</h3>
+          <p class="card-desc">Connect with any Ethereum wallet in one click. Deposit, track spending, and withdraw your earnings whenever you want.</p>
+        </div>
+        <div class="card p-8 feature-card">
+          <div class="card-num">05</div>
+          <h3 class="card-title font-display" style="font-size: 1.1rem;">Earn From Your Website</h3>
+          <p class="card-desc">Copy and paste one line of code onto your site. Visitors can opt in to share their spare resources, and you both earn.</p>
+        </div>
+        <div class="card p-8 feature-card">
+          <div class="card-num">06</div>
+          <h3 class="card-title font-display" style="font-size: 1.1rem;">Built-In Analytics</h3>
+          <p class="card-desc">The same script tag also tracks pageviews, clicks, and referrers — no cookies, no tracking of personal data. <a href="/dashboard" style="color: var(--primary); text-decoration: none;">View dashboard →</a></p>
+        </div>
+        <div class="card p-8 feature-card">
+          <div class="card-num">07</div>
+          <h3 class="card-title font-display" style="font-size: 1.1rem;">Custom Domains</h3>
+          <p class="card-desc">Give your deployment a real web address. Pay with your wallet and DNS is configured automatically — no extra setup.</p>
+        </div>
+        <div class="card p-8 feature-card">
+          <div class="card-num">08</div>
+          <h3 class="card-title font-display" style="font-size: 1.1rem;">Open Source</h3>
+          <p class="card-desc">MIT licensed. Built on Akash, Golem, Mysterium, Anyone, Storj, and Web3Auth. Fully auditable, community-driven stack.</p>
+        </div>
+        <div class="card p-8 feature-card">
+          <div class="card-num">09</div>
+          <h3 class="card-title font-display" style="font-size: 1.1rem;">Referral Rewards</h3>
+          <p class="card-desc">Invite friends and earn a share of their activity on-chain. No caps, no expiring links — just an extra way to earn.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="py-28 border-t bg-card">
+    <div class="container">
+      <div class="grid md-grid-2 gap-16 items-start">
+        <div>
+          <div class="section-label">Earnings</div>
+          <h2 class="section-title font-display">Your node.<br>Your earnings.</h2>
+          <p class="text-muted text-sm leading-relaxed mb-8">One node, five ways to earn. Track everything from a single dashboard and get paid straight to your wallet — no middlemen, no waiting periods.</p>
+          <div class="checklist">
+            <div class="checklist-item"><span class="check">◈</span><span class="text">Works across 5 major decentralized networks</span></div>
+            <div class="checklist-item"><span class="check">◈</span><span class="text">Log in with any Ethereum wallet</span></div>
+            <div class="checklist-item"><span class="check">◈</span><span class="text">Watch your earnings update in real time</span></div>
+            <div class="checklist-item"><span class="check">◈</span><span class="text">Withdraw to your wallet anytime</span></div>
+            <div class="checklist-item"><span class="check">◈</span><span class="text">Refer friends and earn a share of their activity</span></div>
+            <div class="checklist-item"><span class="check">◈</span><span class="text">Give any deployment a custom web address</span></div>
+          </div>
+        </div>
+        <div class="border rounded-sm overflow-hidden">
+          <div class="px-5 py-3 border-b bg-muted flex items-center gap-2"><span class="text-xs text-muted tracking-widest uppercase font-mono">Network Resources</span></div>
+          <table class="contracts-table">
+            <thead><tr><th>Network</th><th>Resource</th></tr></thead>
+            <tbody>
+              <tr><td>Akash Network</td><td class="tech">GPU / Compute</td></tr>
+              <tr><td>Golem Network</td><td class="tech">CPU / Compute</td></tr>
+              <tr><td>Mysterium</td><td class="tech">Bandwidth</td></tr>
+              <tr><td>Anyone Protocol</td><td class="tech">Bandwidth</td></tr>
+              <tr><td>Storj</td><td class="tech">Storage</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="how" class="py-28 border-t">
+    <div class="container">
+      <div class="mb-20 text-center">
+        <div class="section-label center">Getting Started</div>
+        <h2 class="section-title font-display">Install. Configure. Earn.</h2>
+      </div>
+      <div class="grid-px md-grid-3">
+        <div class="card p-10 step-card">
+          <div class="step-num font-display">01</div>
+          <h3 class="text-xl font-bold mb-4 font-display">Install</h3>
+          <p class="text-muted text-sm leading-relaxed">Download the Chimera app for your computer. Takes less than a minute, no technical setup.</p>
+        </div>
+        <div class="card p-10 step-card">
+          <div class="step-num font-display">02</div>
+          <h3 class="text-xl font-bold mb-4 font-display">Configure</h3>
+          <p class="text-muted text-sm leading-relaxed">Connect any Ethereum wallet in one click. Pick what you want to share — compute, storage, bandwidth, or all of it.</p>
+        </div>
+        <div class="card p-10 step-card">
+          <div class="step-num font-display">03</div>
+          <h3 class="text-xl font-bold mb-4 font-display">Earn</h3>
+          <p class="text-muted text-sm leading-relaxed">That's it — your device starts earning automatically. Watch your balance grow and withdraw to your wallet whenever you like.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="download" class="py-28 border-t bg-card">
+    <div class="container">
+      <div class="mb-16 flex items-end justify-between flex-wrap gap-6">
+        <div>
+          <div class="section-label">Download</div>
+          <h2 class="section-title font-display">Get the node.</h2>
+        </div>
+        <p class="text-xs text-muted font-mono" id="platform-detect">↓ Detecting your platform...</p>
+      </div>
+      <div class="grid-px grid-cols-2 md-grid-3">
+        <button class="platform-card js-download-trigger" data-download="linux">
+          <div class="platform-header"><span class="platform-name">Linux</span><span class="platform-download"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></span></div>
+          <span class="platform-format">.deb</span><span class="platform-format">.rpm</span>
+        </button>
+        <button class="platform-card js-download-trigger" data-download="macos">
+          <div class="platform-header"><span class="platform-name">macOS</span><span class="platform-download"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></span></div>
+          <span class="platform-format">Universal .dmg</span>
+        </button>
+        <button class="platform-card js-download-trigger" data-download="windows">
+          <div class="platform-header"><span class="platform-name">Windows</span><span class="platform-download"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></span></div>
+          <span class="platform-format">.msi</span><span class="platform-format">.exe</span>
+        </button>
+        <button class="platform-card" disabled style="opacity:0.5;cursor:not-allowed;">
+          <div class="platform-header"><span class="platform-name">Docker</span><span class="platform-download"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></span></div>
+          <span class="platform-format">Coming soon</span>
+        </button>
+        <button class="platform-card" disabled style="opacity:0.5;cursor:not-allowed;">
+          <div class="platform-header"><span class="platform-name">iOS</span><span class="platform-download"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></span></div>
+          <span class="platform-format">Coming soon</span>
+        </button>
+        <button class="platform-card" disabled style="opacity:0.5;cursor:not-allowed;">
+          <div class="platform-header"><span class="platform-name">Android</span><span class="platform-download"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></span></div>
+          <span class="platform-format">Coming soon</span>
+        </button>
+      </div>
+    </div>
+  </section>
+
+  <section class="py-28 border-t">
+    <div class="container">
+      <div class="mb-16">
+        <div class="section-label">SDK</div>
+        <h2 class="section-title font-display">Build on Chimera.</h2>
+      </div>
+      <div class="grid-px md-grid-2">
+        <div class="sdk-card primary-border">
+          <div class="sdk-tag sdk-tag-primary">LLM Wiki</div>
+          <h3 class="sdk-title font-display">The first app built on Chimera</h3>
+          <p class="sdk-desc">AI-powered writing with auto-save and P2P sync across devices. Built entirely on the Chimera SDK as a reference implementation.</p>
+          <a href="/example" class="sdk-link">Open LLM Wiki <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></a>
+        </div>
+        <div class="sdk-card" style="border-left: 1px solid var(--border);">
+          <div class="sdk-tag sdk-tag-muted">Your App Here</div>
+          <h3 class="sdk-title font-display">Build something new</h3>
+          <p class="sdk-desc">The Chimera console integrates Akash, Golem, Mysterium, Anyone, and Storj networks with Web3Auth EVM wallet payments. Deploy, monitor, and earn across decentralized infrastructure from one dashboard.</p>
+          <a href="https://github.com/LocalChimera/localchimera/tree/main/sdk" class="sdk-link muted" target="_blank" rel="noopener">Read the SDK docs <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg></a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <footer class="border-t py-16">
+    <div class="container">
+      <div class="footer-grid">
+        <div class="footer-brand">
+          <div class="flex items-center gap-2">
+            <img src="chimeralogo-header.png" alt="Chimera logo" class="w-7 h-7 object-contain">
+            <span class="font-bold text-lg font-display">Chimera</span>
+          </div>
+          <p>Turn your idle hardware into passive income. Open source, no middlemen, pays straight to your wallet.</p>
+          <div class="socials">
+            <a href="https://github.com/LocalChimera/localchimera" target="_blank" rel="noopener" aria-label="GitHub">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4"/><path d="M9 18c-4.51 2-5-2-7-2"/></svg>
+            </a>
+            <a href="https://x.com/LocalChimera" target="_blank" rel="noopener" aria-label="X / Twitter">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 4s-.7 2.1-2 3.4c1.6 10-9.4 17.3-18 11.6 2.2.1 4.4-.6 6-2C3 15.5.5 9.6 3 5c2.2 2.6 5.6 4.1 9 4-.9-4.2 4-6.6 7-3.8 1.1 0 3-1.2 3-1.2z"/></svg>
+            </a>
+          </div>
+        </div>
+        <div class="footer-links">
+          <div class="footer-col">
+            <h4>Product</h4>
+            <a href="/app">Order</a>
+            <a href="/dashboard">Earn</a>
+            <a href="#download">Download</a>
+          </div>
+          <div class="footer-col">
+            <h4>Resources</h4>
+            <a href="/example">Wiki</a>
+            <a href="https://github.com/LocalChimera/localchimera" target="_blank" rel="noopener">GitHub</a>
+          </div>
+        </div>
+      </div>
+      <div class="border-t pt-6 flex flex-col md-flex-row items-start md-items-center justify-between gap-4">
+        <div class="footer-stack">
+          <span>Akash</span><span>Golem</span><span>Mysterium</span><span>Anyone Protocol</span><span>Storj</span><span>Web3Auth</span><span>EVM</span><span>Docker</span><span>Embeddable Scripts</span><span>Analytics</span>
+        </div>
+        <span class="text-xs text-muted-40 font-mono">MIT License</span>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    // Header scroll effect
+    const header = document.getElementById('header');
+    window.addEventListener('scroll', () => { header.classList.toggle('scrolled', window.scrollY > 32); });
+
+    // Mobile menu
+    const menuBtn = document.getElementById('menu-btn');
+    const mobileMenu = document.getElementById('mobile-menu');
+    menuBtn.addEventListener('click', () => { mobileMenu.classList.toggle('hidden'); mobileMenu.classList.toggle('flex'); });
+
+    // Animated terminal stats
+    let stats = { jobs: 14823, nodes: 3041, earned: 204812.47 };
+    const elNodes = document.getElementById('stat-nodes');
+    const elJobs = document.getElementById('stat-jobs');
+    const elEarned = document.getElementById('stat-earned');
+    setInterval(() => {
+      stats.jobs += Math.floor(Math.random() * 4);
+      stats.nodes += Math.random() > 0.72 ? 1 : 0;
+      stats.earned += Math.random() * 1.8;
+      elNodes.textContent = stats.nodes.toLocaleString();
+      elJobs.textContent = stats.jobs.toLocaleString();
+      elEarned.textContent = stats.earned.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }, 1600);
+
+    // Duplicate marquee content for seamless loop
+    const marquee = document.getElementById('marquee');
+    const clone = marquee.innerHTML;
+    marquee.innerHTML = clone + clone + clone + clone;
+
+    // OS auto-detection and download triggers
+    // Artifacts sourced from https://github.com/LocalChimera/localchimera/releases/latest
+    const DOWNLOAD_URLS = {
+      linux: 'https://github.com/LocalChimera/localchimera/releases/latest/download/Chimera_1.0.22_amd64.deb',
+      linuxRpm: 'https://github.com/LocalChimera/localchimera/releases/latest/download/Chimera-1.0.22-1.x86_64.rpm',
+      macos: 'https://github.com/LocalChimera/localchimera/releases/latest/download/Chimera_1.0.22_universal.dmg',
+      windows: 'https://github.com/LocalChimera/localchimera/releases/latest/download/Chimera_1.0.22_x64_en-US.msi',
+      windowsExe: 'https://github.com/LocalChimera/localchimera/releases/latest/download/Chimera_1.0.22_x64-setup.exe',
+    };
+
+    function detectOS() {
+      const ua = navigator.userAgent.toLowerCase();
+      if (ua.includes('iphone') || ua.includes('ipad') || ua.includes('ipod')) return 'ios';
+      if (ua.includes('android')) return 'android';
+      if (ua.includes('win')) return 'windows';
+      if (ua.includes('mac') || ua.includes('darwin')) return 'macos';
+      if (ua.includes('linux')) return 'linux';
+      return 'linux';
+    }
+
+    function triggerDownload(os) {
+      const url = DOWNLOAD_URLS[os] || DOWNLOAD_URLS[detectOS()];
+      if (!url) return;
+      // Same-tab navigation follows GitHub's release redirect and triggers the file download
+      window.location.href = url;
+    }
+
+    document.querySelectorAll('.js-download-trigger').forEach((el) => {
+      el.addEventListener('click', (e) => {
+        // Stop the link from navigating to /#download before we trigger the download
+        e.preventDefault();
+        const mode = el.dataset.download || 'auto';
+        const os = mode === 'auto' ? detectOS() : mode;
+        triggerDownload(os);
+      });
+    });
+
+    const osLabel = document.getElementById('platform-detect');
+    if (osLabel) {
+      const names = { linux: 'Linux', macos: 'macOS', windows: 'Windows', ios: 'iOS', android: 'Android' };
+      osLabel.textContent = `↓ Detected ${names[detectOS()] || 'your platform'}`;
+    }
+  </script>
+
+</body>
+</html>

@@ -1,13 +1,9 @@
 import { useState } from 'react';
 import { Search, Globe, CheckCircle, Loader2, ShoppingCart, Wallet } from 'lucide-react';
 import { Button } from './ui';
-import { transferCSPRWithWallet } from '../casper-client';
-import { getSignerFromWeb3AuthWallet, getContractsWithSigner } from '../botchain';
-import { ethers } from 'ethers';
 import type { TxRecord } from '../types';
 
 const PROXY_BASE = '/api/namesilo';
-const PROTOCOL_MULTISIG_PUBKEY = '02038cc8406b93afa9404b47c836b7c83ce0a4e669c611b2712f3ba7fa9b79bb6f3a';
 
 const SEARCH_TLDS = ['com', 'net', 'org', 'io', 'ai', 'co', 'dev', 'xyz', 'app', 'tech', 'cloud', 'online', 'store', 'site'];
 
@@ -18,19 +14,9 @@ interface DomainResult {
 }
 
 export default function DomainRegistration({
-  walletMode,
-  provider,
-  publicKeyHex,
-  accountHash,
-  botchainWallet,
   evmAddress,
   onTx,
 }: {
-  walletMode?: 'casper' | 'botchain' | 'evm' | null;
-  provider?: any;
-  publicKeyHex?: string;
-  accountHash?: string;
-  botchainWallet?: any;
   evmAddress?: string;
   onTx?: (tx: TxRecord) => void;
 }) {
@@ -43,7 +29,6 @@ export default function DomainRegistration({
   const [registering, setRegistering] = useState(false);
   const [success, setSuccess] = useState('');
   const [contact, setContact] = useState({ name: '', email: '', phone: '', address: '', city: '', state: '', country: 'US', postcode: '' });
-  const [payMethod, setPayMethod] = useState<'casper' | 'botchain'>('casper');
 
   async function checkAvailability() {
     setError(''); setSuccess(''); setResults([]); setSelectedDomain(null); setHasSearched(false);
@@ -74,84 +59,25 @@ export default function DomainRegistration({
     setChecking(false);
   }
 
-  async function payViaCasper(amountCSPR: string, orderId: string): Promise<string> {
-    if (!provider || !publicKeyHex) throw new Error('Casper wallet not connected');
-    const amountMotes = Math.floor(parseFloat(amountCSPR) * 1e9).toString();
-    const targetAccountHash = 'account-hash-' + PROTOCOL_MULTISIG_PUBKEY.slice(2);
-    const result = await transferCSPRWithWallet(
-      provider,
-      publicKeyHex,
-      targetAccountHash,
-      amountMotes,
-      Date.now(),
-    );
-    if (result.error) throw new Error(result.error);
-    if (result.deployHash && onTx) {
-      onTx({ id: Date.now().toString(), deployHash: result.deployHash, entryPoint: 'transfer', contract: 'ProtocolMultisig', status: 'pending' });
-    }
-    return result.deployHash;
-  }
-
-  async function payViaBotchain(amountEth: string, orderId: string): Promise<boolean> {
-    if (!botchainWallet || !evmAddress) throw new Error('Botchain wallet not connected');
-    const signer = await getSignerFromWeb3AuthWallet(botchainWallet);
-    const contracts = getContractsWithSigner(signer);
-    const amount = ethers.parseEther(amountEth);
-    const balance = await contracts.escrowVault.getBalance(evmAddress);
-    if (balance < amount) {
-      const tx = await contracts.escrowVault.deposit({ value: amount });
-      const receipt = await tx.wait();
-      if (onTx) onTx({ id: Date.now().toString(), hash: receipt?.hash || tx.hash, entryPoint: 'deposit', contract: 'EscrowVault', status: 'success' });
-    }
-    const requestHash = ethers.keccak256(ethers.toUtf8Bytes(orderId));
-    const validUntil = Math.floor(Date.now() / 1000) + 86400;
-    const tx = await contracts.escrowVault.createJob(
-      ethers.ZeroAddress,
-      requestHash,
-      Date.now(),
-      4,
-      validUntil,
-      '0x',
-      amount,
-      ethers.ZeroAddress,
-      '0x00000000000000000000000000000000'
-    );
-    const receipt = await tx.wait();
-    if (onTx) onTx({ id: Date.now().toString(), hash: receipt?.hash || tx.hash, entryPoint: 'createJob', contract: 'EscrowVault', status: 'success' });
-    return true;
-  }
-
   async function registerDomain(e: React.FormEvent) {
     e.preventDefault(); setError(''); setSuccess('');
     if (!selectedDomain || !selectedDomain.available) { setError('Select an available domain.'); return; }
+    if (!evmAddress) { setError('Connect your wallet first.'); return; }
     for (const key of Object.keys(contact)) {
       if (!contact[key as keyof typeof contact]) { setError(`${key} is required.`); return; }
     }
     const priceUSD = parseFloat(selectedDomain.price || '10');
-    const amountCSPR = String(Math.ceil(priceUSD * 20));
-    const amountEth = String(Math.ceil(priceUSD * 0.005 * 1000) / 1000);
     const orderId = `DOMAIN:${selectedDomain.domain}:${Date.now()}`;
     setRegistering(true);
     const parts = contact.name.trim().split(/\s+/);
     try {
-      let deployHash = '';
-      if (payMethod === 'casper') {
-        if (!provider || !publicKeyHex) { setError('Connect your Casper wallet first.'); setRegistering(false); return; }
-        deployHash = await payViaCasper(amountCSPR, orderId);
-        if (!deployHash) { setError('Payment failed: no deploy hash returned.'); setRegistering(false); return; }
-      } else if (payMethod === 'botchain') {
-        if (!botchainWallet || !evmAddress) { setError('Connect your Botchain wallet first.'); setRegistering(false); return; }
-        await payViaBotchain(amountEth, orderId);
-      }
-
       const res = await fetch(`${PROXY_BASE}/registerDomain`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           domain: selectedDomain.domain, years: 1,
-          deployHash,
-          paymentMethod: payMethod,
-          paymentAmount: payMethod === 'casper' ? amountCSPR : amountEth,
+          walletAddress: evmAddress,
+          paymentAmount: String(priceUSD),
           orderId,
           contact: {
             fn: parts[0] || contact.name, ln: parts.slice(1).join(' ') || parts[0] || '',
@@ -224,20 +150,6 @@ export default function DomainRegistration({
               <span className="text-[15px] font-bold text-slate-800">${selectedDomain.price}/yr</span>
             </div>
           )}
-          <div>
-            <label className="block text-[12px] font-semibold text-slate-600 mb-2">Payment Method</label>
-            <div className="flex gap-2">
-              <button type="button" onClick={() => setPayMethod('casper')} className={`flex items-center gap-2 px-4 py-2.5 rounded-[10px] text-[13px] font-semibold border transition ${payMethod === 'casper' ? 'bg-[#111111] text-white border-[#111111]' : 'border-[#e5e5e5] text-slate-700 hover:bg-slate-100'}`}>
-                <Wallet className="w-4 h-4" /> Casper (CSPR)
-              </button>
-              <button type="button" onClick={() => setPayMethod('botchain')} className={`flex items-center gap-2 px-4 py-2.5 rounded-[10px] text-[13px] font-semibold border transition ${payMethod === 'botchain' ? 'bg-[#111111] text-white border-[#111111]' : 'border-[#e5e5e5] text-slate-700 hover:bg-slate-100'}`}>
-                <Wallet className="w-4 h-4" /> Botchain (ETH)
-              </button>
-            </div>
-            <p className="text-[11px] text-slate-400 mt-1.5">
-              {payMethod === 'casper' ? `~${Math.ceil(parseFloat(selectedDomain.price || '10') * 20)} CSPR` : `~${String(Math.ceil(parseFloat(selectedDomain.price || '10') * 0.005 * 1000) / 1000)} ETH`} will be escrowed via smart contract.
-            </p>
-          </div>
           {['name', 'email', 'phone', 'address', 'city', 'state', 'postcode'].map((key) => (
             <div key={key}>
               <label className="block text-[12px] font-semibold text-slate-600 mb-1 capitalize">{key}</label>
