@@ -1,0 +1,37 @@
+name = "chimera-coordinator"
+main = "src/index.ts"
+compatibility_date = "2024-12-01"
+compatibility_flags = ["nodejs_compat"]
+account_id = "6c0140469651854b2e358517371a03d3"
+
+routes = [
+  { pattern = "coordinator.widespread.fyi", custom_domain = true }
+]
+
+[vars]
+# Base mainnet; override to https://sepolia.base.org while testing.
+BASE_RPC_URL = "https://mainnet.base.org"
+# Set after DeployVolunteerEscrow.s.sol — the ERC1967Proxy address.
+ESCROW_CONTRACT = "0x0000000000000000000000000000000000000000"
+# Public sentinel — volunteers are an open pool; this token is only a
+# handshake marker, not a secret (abuse control lives in per-IP limits).
+VOLUNTEER_TOKEN = "widespread-volunteer"
+POLL_INTERVAL_MS = "15000"
+JOB_RESULT_TIMEOUT_MS = "60000"
+MAX_PAYLOAD_BYTES = "8192"
+MAX_VOLUNTEERS = "5000"
+
+[[durable_objects.bindings]]
+name = "COORDINATOR"
+class_name = "CoordinatorDO"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["CoordinatorDO"]
+
+# [secrets] — set via `wrangler secret put`:
+#   COORDINATOR_PRIVATE_KEY — task key; COORDINATOR_ROLE on the escrow
+#     contract, funded with a little Base ETH for gas. Never receives
+#     payments (escrow releases to SETTLEMENT_ADDRESS baked into the contract).
+#   DISPATCH_AUTH_TOKEN    — authenticates POST /jobs (direct job injection)
+#   ADMIN_TOKEN            — authenticates POST /settle + ledger export

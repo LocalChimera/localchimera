@@ -1,0 +1,20 @@
+{
+  "name": "@localchimera/coordinator",
+  "version": "1.0.0",
+  "description": "Chimera volunteer coordinator — Cloudflare Worker + Durable Object. Polls the VolunteerEscrow contract on Base, pushes jobs to browser volunteers over WebSocket, submits completions on-chain, and keeps a per-volunteer ledger for monthly Logos settlement.",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "viem": "^2.21.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260928.1",
+    "typescript": "^5.9.3",
+    "wrangler": "^4.142.0"
+  }
+}
