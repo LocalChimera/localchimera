@@ -50,6 +50,44 @@ export function lintPayload(payload: string): string | null {
   return null
 }
 
+/** Deep lint — @secretlint/core + the recommend preset (AWS/GCP/npm/GitHub/
+ *  Slack/Stripe/Shopify/SendGrid/privatekey/basicauth rules). Runs after the
+ *  regex fast-path; a hit here returns a rule id, failures degrade to the
+ *  regex layer alone (logged — never silently skipped). Lazy-imported so the
+ *  preset cost is paid once per isolate, not per job. */
+let presetMod: Promise<typeof import('@secretlint/secretlint-rule-preset-recommend')> | null = null
+export async function lintPayloadDeep(payload: string): Promise<string | null> {
+  try {
+    const { lintSource } = await import('@secretlint/core')
+    // workerd lacks PerformanceObserver — disable the profiler before the
+    // first mark() would lazily try to construct one.
+    const { secretLintProfiler } = await import('@secretlint/profiler')
+    secretLintProfiler.setEnabled(false)
+    presetMod ??= import('@secretlint/secretlint-rule-preset-recommend')
+    const { creator } = await presetMod
+    const res = await lintSource({
+      source: {
+        content: payload,
+        filePath: 'payload.txt',
+        ext: '.txt',
+        contentType: 'text',
+      },
+      options: {
+        config: {
+          rules: [
+            { id: '@secretlint/secretlint-rule-preset-recommend', rule: creator, options: {} },
+          ],
+        },
+      },
+    })
+    const hit = res.messages.find((m) => m.severity === 'error' || m.ruleId)
+    return hit ? `secretlint:${hit.ruleId ?? 'hit'}` : null
+  } catch (e) {
+    console.error('[lint] secretlint layer failed, regex layer only:', e)
+    return null
+  }
+}
+
 /** PUBLIC is the only classification accepted in Phase 1 — INTERNAL plumbing
  *  lands in P3 with the secrets-broker/redaction path it needs. */
 export function classificationOk(classification: unknown): boolean {

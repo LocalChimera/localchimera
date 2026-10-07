@@ -28,7 +28,7 @@
 
 import type { VolunteerMeta } from './registry'
 import { normalizeTaskTypes, selectVolunteer, validateJobResult, PROJECT, CANONICAL } from './registry'
-import { lintPayload, classificationOk, redactPayload, parseSealed } from './lint'
+import { lintPayload, lintPayloadDeep, classificationOk, redactPayload, parseSealed } from './lint'
 import { ESCROW_ABI, makeClients, resultHash, signDispatch } from './chain'
 import { verifyMessage, verifyTypedData } from 'viem'
 import type { Hex } from 'viem'
@@ -288,23 +288,23 @@ export class CoordinatorDO implements DurableObject {
       return this.json({ balances: Object.fromEntries(all) })
     }
     if (url.pathname === '/jobs' && req.method === 'POST') {
-      const auth = this.jobAuth(req)
+      const auth = await this.jobAuth(req)
       if (!auth.ok) return this.json({ error: 'unauthorized' }, 401)
       return this.handleDirectJob(req, auth.project)
     }
     if (url.pathname === '/jobs/batch' && req.method === 'POST') {
-      const auth = this.jobAuth(req)
+      const auth = await this.jobAuth(req)
       if (!auth.ok) return this.json({ error: 'unauthorized' }, 401)
       return this.handleBatchJob(req, auth.project)
     }
     if (url.pathname === '/v1/chat/completions' && req.method === 'POST') {
-      const auth = this.jobAuth(req)
+      const auth = await this.jobAuth(req)
       if (!auth.ok) return this.json({ error: 'unauthorized' }, 401)
       return this.handleChatCompletions(req, auth.project)
     }
     if (url.pathname === '/patronage' && req.method === 'POST') {
       // Direct micro-donations → ledger credit + provisioned rep.
-      const auth = this.jobAuth(req)
+      const auth = await this.jobAuth(req)
       if (!auth.ok) return this.json({ error: 'unauthorized' }, 401)
       return this.handlePatronage(req, auth.project)
     }
@@ -316,6 +316,23 @@ export class CoordinatorDO implements DurableObject {
       await this.state.storage.delete(`spend:project:${body.project}`)
       await this.audit('pool.unpaused', { project: body.project })
       return this.json({ ok: true })
+    }
+    if (url.pathname === '/admin/tokens') {
+      // Per-project dispatch tokens in DO storage — new pools self-serve
+      // without a redeploy. {slug, token} set; {slug} delete. List redacts.
+      if (!this.bearerOk(req, this.env.ADMIN_TOKEN)) return this.json({ error: 'unauthorized' }, 401)
+      const body = (await req.json().catch(() => ({}))) as { slug?: string; token?: string }
+      if (!body.slug || body.slug.length > 64) return this.json({ error: 'slug required' }, 400)
+      if (req.method === 'DELETE') {
+        await this.state.storage.delete(`dtok:${body.slug}`)
+        await this.audit('token.deleted', { project: body.slug })
+        return this.json({ ok: true })
+      }
+      if (req.method !== 'POST') return this.json({ error: 'method not allowed' }, 405)
+      if (!body.token || body.token.length < 16) return this.json({ error: 'token >=16 chars required' }, 400)
+      await this.state.storage.put(`dtok:${body.slug}`, body.token)
+      await this.audit('token.created', { project: body.slug })
+      return this.json({ ok: true, slug: body.slug })
     }
     if (url.pathname === '/settle' && req.method === 'POST') {
       if (!this.bearerOk(req, this.env.ADMIN_TOKEN)) return this.json({ error: 'unauthorized' }, 401)
@@ -386,7 +403,7 @@ export class CoordinatorDO implements DurableObject {
       ]})
     }
     if (url.pathname === '/mcp/call' && req.method === 'POST') {
-      const auth = this.jobAuth(req)
+      const auth = await this.jobAuth(req)
       if (!auth.ok) return this.json({ error: 'unauthorized' }, 401)
       const body = (await req.json().catch(() => null)) as
         | { name?: string; arguments?: Record<string, unknown> } | null
@@ -703,7 +720,7 @@ export class CoordinatorDO implements DurableObject {
         await this.state.storage.put(`handled:${jobId}`, 'oversize')
         continue
       }
-      const lintHit = lintPayload(payload)
+      const lintHit = lintPayload(payload) ?? await lintPayloadDeep(payload)
       if (lintHit) {
         await this.state.storage.put(`handled:${jobId}`, `lint:${lintHit}`)
         continue
@@ -943,13 +960,24 @@ export class CoordinatorDO implements DurableObject {
           .then((out) => { if (!(out instanceof Response)) void this.dispatch(out.jobId) })
       }
     }
-    await this.credit(
-      volunteerId, job.amountWei, job.site,
-      this.registry.get(volunteerId)?.site === job.site,
-      job.project,
-      this.registry.get(volunteerId)?.project === job.project,
-      job.domain,
-    )
+    // Content-hash dedup — identical results across *different* jobs (per
+    // taskType) skip credit AND rep entirely: farming repeats must not accrue
+    // either. The result still lands on result:<jobId> so the submitter's
+    // await resolves normally. seen: keys are per-taskType so two lanes can
+    // each legitimately produce the same output.
+    const seenKey = `seen:${job.taskType}:${await this.sha256Hex(result)}`
+    if (await this.state.storage.get(seenKey)) {
+      await this.audit('result.duplicate', { jobId, volunteerId })
+    } else {
+      await this.state.storage.put(seenKey, { jobId, volunteerId, at: Date.now() })
+      await this.credit(
+        volunteerId, job.amountWei, job.site,
+        this.registry.get(volunteerId)?.site === job.site,
+        job.project,
+        this.registry.get(volunteerId)?.project === job.project,
+        job.domain,
+      )
+    }
     // Jury adjudication — redundant siblings accumulate under group:<id>;
     // once a quorum of results lands, majority-result jurors gain rep and
     // dissenters lose it (rep-staked validation lite).
@@ -1054,10 +1082,10 @@ export class CoordinatorDO implements DurableObject {
 
   /** Direct-job auth: the global DISPATCH_AUTH_TOKEN accepts anything;
    *  a PROJECT_TOKENS project token restricts submissions to that slug. */
-  private jobAuth(req: Request): { ok: boolean; project?: string } {
+  private async jobAuth(req: Request): Promise<{ ok: boolean; project?: string }> {
     if (this.bearerOk(req, this.env.DISPATCH_AUTH_TOKEN)) return { ok: true }
+    const token = (req.headers.get('authorization') || '').replace(/^Bearer\s+/i, '')
     if (this.env.PROJECT_TOKENS) {
-      const token = (req.headers.get('authorization') || '').replace(/^Bearer\s+/i, '')
       try {
         const tokens = JSON.parse(this.env.PROJECT_TOKENS) as Record<string, string>
         for (const [slug, t] of Object.entries(tokens)) {
@@ -1065,6 +1093,14 @@ export class CoordinatorDO implements DurableObject {
         }
       } catch {
         /* malformed PROJECT_TOKENS — global auth already failed, deny */
+      }
+    }
+    // DO-storage tokens — provisioned at runtime via /admin/tokens so new
+    // projects don't need a redeploy. dtok:<slug> = token.
+    if (token) {
+      const entries = await this.state.storage.list({ prefix: 'dtok:', limit: 500 })
+      for (const [key, t] of entries) {
+        if (t === token) return { ok: true, project: key.slice(5) }
       }
     }
     return { ok: false }
@@ -1089,7 +1125,7 @@ export class CoordinatorDO implements DurableObject {
     if (project && (await this.state.storage.get(`paused:project:${project}`))) {
       return this.json({ error: `project "${project}" is paused (budget breach)` }, 503)
     }
-    const lintHit = lintPayload(body.payload)
+    const lintHit = lintPayload(body.payload) ?? (await lintPayloadDeep(body.payload))
     if (lintHit) {
       return this.json({ error: `payload rejected by lint: ${lintHit}` }, 400)
     }
