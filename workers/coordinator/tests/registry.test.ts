@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   CANONICAL, WPCLOUD, PROJECT, SWARM,
-  normalizeTaskTypes, selectVolunteer, validateJobResult,
+  normalizeTaskTypes, stripSwarmClaims, selectVolunteer, validateJobResult,
   HARD_JOB_MIN_SCORE,
 } from '../src/registry'
 import type { VolunteerMeta } from '../src/registry'
@@ -27,9 +27,14 @@ describe('task-type ranges', () => {
     // 206 = CANARY (coordinator-internal echo check)
     expect(normalizeTaskTypes([0, 1, 2, 3, 100, 103, 200, 205, 206])).toEqual([0, 1, 2, 3, 100, 103, 200, 205, 206])
   })
-  it('collapses out-of-range and swarm-reserved types to 0 (upstream compat)', () => {
-    expect(normalizeTaskTypes([SWARM.SWARM_INFER, SWARM.BUILD_VERIFY, 104, 207, 999, 'abc']))
-      .toEqual([0, 0, 0, 0, 0, 0])
+  it('accepts swarm types after normalize but strips them from non-durable claims', () => {
+    // 300-301 are registered ranges; stripSwarmClaims gates them on durable.
+    expect(normalizeTaskTypes([SWARM.SWARM_INFER, SWARM.BUILD_VERIFY])).toEqual([300, 301])
+    expect(stripSwarmClaims(normalizeTaskTypes([300, 301, 0]), false)).toEqual([0, 0, 0])
+    expect(stripSwarmClaims(normalizeTaskTypes([300, 301, 0]), true)).toEqual([300, 301, 0])
+  })
+  it('collapses out-of-range types to 0 (upstream compat)', () => {
+    expect(normalizeTaskTypes([104, 207, 302, 999, 'abc'])).toEqual([0, 0, 0, 0, 0])
   })
   it('non-array input normalizes to empty', () => {
     expect(normalizeTaskTypes(undefined)).toEqual([])
@@ -130,6 +135,12 @@ describe('validateJobResult', () => {
     expect(validateJobResult(PROJECT.WEB_FETCH, ok)).toBe(true)
     expect(validateJobResult(PROJECT.WEB_FETCH, '{"bodyHash":"xyz","bytes":1}')).toBe(false)
     expect(validateJobResult(PROJECT.WEB_FETCH, 'not json')).toBe(false)
+  })
+  it('HUMAN_JURY requires {verdict: nonneg int}, optional rationale', () => {
+    expect(validateJobResult(PROJECT.HUMAN_JURY, '{"verdict":1}')).toBe(true)
+    expect(validateJobResult(PROJECT.HUMAN_JURY, '{"verdict":0,"rationale":"ok"}')).toBe(true)
+    expect(validateJobResult(PROJECT.HUMAN_JURY, '{"verdict":-1}')).toBe(false)
+    expect(validateJobResult(PROJECT.HUMAN_JURY, '"yes"')).toBe(false)
   })
   it('STORAGE pin requires {cid: hex64, verified: true}', () => {
     const ok = JSON.stringify({ cid: 'b'.repeat(64), verified: true })

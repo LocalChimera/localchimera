@@ -27,8 +27,8 @@
  */
 
 import type { VolunteerMeta } from './registry'
-import { normalizeTaskTypes, selectVolunteer, validateJobResult, PROJECT, CANONICAL } from './registry'
-import { lintPayload, lintPayloadDeep, classificationOk, redactPayload, parseSealed } from './lint'
+import { normalizeTaskTypes, stripSwarmClaims, selectVolunteer, validateJobResult, PROJECT, CANONICAL } from './registry'
+import { lintPayload, lintPayloadDeep, classificationOk, redactPayload, parseSealed, stripInstructions, leaksSealed } from './lint'
 import { ESCROW_ABI, makeClients, resultHash, signDispatch } from './chain'
 import { verifyMessage, verifyTypedData } from 'viem'
 import type { Hex } from 'viem'
@@ -69,6 +69,13 @@ interface Env {
   LANE_PREMIUMS?: string
   /** Per-identity daily job cap (0/unset = unlimited) */
   AGENT_DAILY_QUOTA?: string
+  /** Net cross-project draw allowed before zero-price submissions 429
+   *  (free-rider floor; unset = unenforced). Micro-USDC wei. */
+  RECIP_FLOOR_WEI?: string
+  /** % bonus on amountWei for rep-holding nodes (0/unset = no premium) */
+  REP_PREMIUM_PCT?: string
+  /** Base URL for /weights/* redirects — R2 public bucket or CDN origin */
+  WEIGHTS_MIRROR_URL?: string
   /** Hashcash-style PoW gate on /jobs — sha256(payload:nonce) needs this many
    *  leading zero hex digits when >0. Set only if submissions get abused. */
   POW_DIFFICULTY?: string
@@ -184,6 +191,25 @@ export class CoordinatorDO implements DurableObject {
 
     if (url.pathname === '/' && req.headers.get('Upgrade') === 'websocket') {
       return this.handleWsUpgrade(url)
+    }
+    if (url.pathname.startsWith('/weights/')) {
+      // Weight mirror — model assets are served from an external mirror
+      // (R2 public bucket / CDN), not through the DO. The coordinator only
+      // knows the base so nodes have one canonical discovery point; the
+      // redirect keeps bytes off worker CPU billing.
+      const base = this.env.WEIGHTS_MIRROR_URL
+      if (!base) return this.json({ error: 'no weight mirror configured' }, 404)
+      const rel = url.pathname.slice('/weights/'.length)
+      if (!/^[A-Za-z0-9._/-]+$/.test(rel) || rel.includes('..')) {
+        return this.json({ error: 'bad path' }, 400)
+      }
+      return Response.redirect(`${base.replace(/\/$/, '')}/${rel}`, 302)
+    }
+    if (url.pathname === '/pubkey') {
+      // Coordinator identity for node-side JOB_DISPATCH verification —
+      // sigs are EIP-191 over `chimera-job:<jobId>` by this account.
+      const { account } = makeClients(this.env, this.rpcIdx)
+      return this.json({ address: account?.address ?? null, scheme: 'eip191:chimera-job:<jobId>' })
     }
     if (url.pathname === '/status') {
       // ?project=<slug> → counts for just that pool (power-card surfaces
@@ -540,7 +566,7 @@ export class CoordinatorDO implements DurableObject {
         const meta: VolunteerMeta = {
           id,
           address: env.address || '',
-          taskTypes: normalizeTaskTypes(env.taskTypes),
+          taskTypes: stripSwarmClaims(normalizeTaskTypes(env.taskTypes), env.durable === true),
           capabilities: env.capabilities || {},
           networks: env.networks?.length ? env.networks : ['base'],
           site: typeof env.site === 'string' ? env.site.slice(0, 64) : undefined,
@@ -574,7 +600,7 @@ export class CoordinatorDO implements DurableObject {
           // env.status is ignored — upstream heartbeats always claim 'idle',
           // which would clobber 'busy' mid-job. The DO owns busy/idle via the
           // assignment lifecycle.
-          if (env.taskTypes) v.taskTypes = normalizeTaskTypes(env.taskTypes)
+          if (env.taskTypes) v.taskTypes = stripSwarmClaims(normalizeTaskTypes(env.taskTypes), v.durable)
           if (env.capabilities) v.capabilities = env.capabilities
           ws.serializeAttachment(v)
         }
@@ -592,6 +618,18 @@ export class CoordinatorDO implements DurableObject {
         if (env.jobId && meta) void this.onJobRejected(env.jobId, meta.id, env.reason)
         break
       }
+      case 'EXIT': {
+        // Honest exit — a draining node announces departure; its in-flight
+        // assignments release immediately for re-dispatch rather than dying
+        // on the result timeout. Then close cleanly.
+        const meta = this.metaFor(ws)
+        if (meta) {
+          void this.releaseVolunteerAssignments(meta.id)
+          this.registry.delete(meta.id)
+        }
+        try { ws.close(1000, 'exit') } catch { /* already closed */ }
+        break
+      }
       default:
         ws.send(JSON.stringify({ type: 'ERROR', error: 'unknown type' }))
     }
@@ -599,8 +637,24 @@ export class CoordinatorDO implements DurableObject {
 
   async webSocketClose(ws: WebSocket) {
     const meta = this.metaFor(ws)
-    if (meta) this.registry.delete(meta.id)
+    if (meta) {
+      // Unannounced drop — same release path as honest EXIT so a crashed
+      // node's jobs re-dispatch promptly rather than waiting out
+      // JOB_RESULT_TIMEOUT_MS.
+      await this.releaseVolunteerAssignments(meta.id)
+      this.registry.delete(meta.id)
+    }
     try { ws.close() } catch { /* already closed */ }
+  }
+
+  /** Release every job still assigned to a departing volunteer back to
+   *  pending. In-flight RESULTs that arrive later are ignored because the
+   *  assignment row is gone — correct: only the current assignee may resolve. */
+  private async releaseVolunteerAssignments(volunteerId: string) {
+    for (const key of await this.keys('assigned:')) {
+      const a = (await this.state.storage.get(key)) as { volunteerId?: string } | undefined
+      if (a?.volunteerId === volunteerId) await this.releaseAssignment(key.slice(9))
+    }
   }
 
   async webSocketError(ws: WebSocket) {
@@ -888,6 +942,43 @@ export class CoordinatorDO implements DurableObject {
       return
     }
 
+    // Seal-leak killswitch — a result containing a sealed value means the
+    // node saw material it should never have had (leak through the payload
+    // path, or the node scans its own environment). No credit, the node is
+    // banned outright (trust pinned below the exclusion floor), and the
+    // event is audit-logged — this is the CanaryTrip analog on the result
+    // side of the boundary.
+    const sealHit = leaksSealed(result, parseSealed(this.env.SEALED_VALUES))
+    if (sealHit) {
+      await this.state.storage.delete(`pending:${jobId}`)
+      await this.state.storage.delete(`assigned:${jobId}`)
+      await this.state.storage.put(`handled:${jobId}`, `seal-leak:${sealHit}`)
+      await this.state.storage.put(`result:${jobId}`, {
+        volunteerId, result: '[redacted:seal-leak]', at: Date.now(),
+        source: job.source, sealLeak: true,
+      })
+      const v0 = this.registry.get(volunteerId)
+      if (v0) {
+        v0.status = 'idle'
+        v0.trust = -1000
+        this.wsFor(v0.id)?.serializeAttachment(v0)
+        try { this.wsFor(v0.id)?.close(4000, 'seal-leak') } catch { /* gone */ }
+      }
+      await this.audit('seal.leak', { jobId, volunteerId, name: sealHit })
+      const pending = this.awaiting.get(jobId)
+      if (pending) { this.awaiting.delete(jobId); pending.resolve(true) }
+      return
+    }
+
+    // Instruction-strip — node results are untrusted content; lines shaped
+    // like prompt-injection payloads are removed before the result is
+    // stored (consumers still quote-embed, never raw-concat).
+    const clean = stripInstructions(result)
+    if (clean.stripped > 0) {
+      await this.audit('result.stripped', { jobId, volunteerId, lines: clean.stripped })
+      result = clean.text
+    }
+
     if (job.source === 'chain') {
       const { wallet, contract } = makeClients(this.env)
       if (!wallet) return
@@ -1124,6 +1215,24 @@ export class CoordinatorDO implements DurableObject {
     // cap refuses new work until /pools/unpause (admin) resets it.
     if (project && (await this.state.storage.get(`paused:project:${project}`))) {
       return this.json({ error: `project "${project}" is paused (budget breach)` }, 503)
+    }
+    // Free-rider floor — a project that draws cross-project compute without
+    // its supporters serving anyone else is capped at RECIP_FLOOR_WEI of net
+    // draw. Net = drawn (recip:*:project) - banked (recip:project:*); the
+    // default floor of 0 still permits paid jobs, it only throttles
+    // zero-price free rides.
+    if (project && this.env.RECIP_FLOOR_WEI !== undefined) {
+      const floor = BigInt(this.env.RECIP_FLOOR_WEI || '0')
+      const drawn = await this.state.storage.list({ prefix: 'recip:' })
+      let net = 0n
+      for (const [k, v] of drawn) {
+        const [, a, b] = k.split(':')
+        if (b === project) net += BigInt(String(v))
+        else if (a === project) net -= BigInt(String(v))
+      }
+      if (net > floor && !body.amountWei) {
+        return this.json({ error: `project "${project}" over reciprocity floor — supporters must serve other pools or jobs must carry amountWei` }, 429)
+      }
     }
     const lintHit = lintPayload(body.payload) ?? (await lintPayloadDeep(body.payload))
     if (lintHit) {
@@ -1477,12 +1586,20 @@ export class CoordinatorDO implements DurableObject {
    *  runbook. Balances under MIN_PAYOUT_WEI convert to rep points instead
    *  of a payout (dust→rep: sub-dust balances aren't worth gas/admin). */
   private async handleSettle(req: Request): Promise<Response> {
-    const body = (await req.json().catch(() => ({}))) as { ids?: string[] }
+    const body = (await req.json().catch(() => ({}))) as { ids?: string[]; project?: string }
     const dust = BigInt(this.env.MIN_PAYOUT_WEI || '0')
+    // Per-project statement: settle only ledgers of volunteers registered
+    // into the project pool, and include the pool's own host-share ledger.
+    const projectIds = body.project
+      ? new Set(
+          [...this.registry.values()].filter((v) => v.project === body.project).map((v) => v.id),
+        )
+      : null
     const out: Record<string, unknown> = {}
     for (const key of await this.keys('ledger:')) {
       const id = key.slice(7)
-      if (body.ids?.length && !body.ids.includes(id)) continue
+      if (projectIds && id !== `project:${body.project}` && !projectIds.has(id)) continue
+      if (!projectIds && body.ids?.length && !body.ids.includes(id)) continue
       const led = (await this.state.storage.get(key)) as
         | { totalWei: string; jobs: number; settledWei: string }
         | undefined
@@ -1492,7 +1609,7 @@ export class CoordinatorDO implements DurableObject {
         // Dust → rep: mark settled, convert to rep points (1 point per micro-USDC).
         led.settledWei = led.totalWei
         await this.state.storage.put(key, led)
-        await this.addRep(id, Math.max(1, Math.floor(Number(unpaid / 1_000_000n))), 'dust-conversion')
+        await this.addRep(id, Math.max(1, Math.floor(Number(unpaid / 1_000_000n))), 'dust-conversion', undefined, 'provisioned')
         out[id] = { settledWei: '0', dustToRep: unpaid.toString() }
         continue
       }
@@ -1500,15 +1617,15 @@ export class CoordinatorDO implements DurableObject {
       await this.state.storage.put(key, led)
       out[id] = { settledWei: unpaid.toString() }
     }
-    await this.audit('settle', { ledgers: Object.keys(out).length })
-    return this.json({ settled: out })
+    await this.audit('settle', { ledgers: Object.keys(out).length, project: body.project })
+    return this.json({ settled: out, project: body.project })
   }
 
   /** Direct micro-donations → provisioned rep + ledger credit. A patronage
    *  can target a volunteerId (tip) or a project slug (pool funding). */
   private async handlePatronage(req: Request, authProject?: string): Promise<Response> {
     const body = (await req.json().catch(() => null)) as
-      | { volunteerId?: string; project?: string; amountWei?: string; note?: string }
+      | { volunteerId?: string; project?: string; amountWei?: string; note?: string; patron?: string }
       | null
     if (!body?.amountWei || !/^\d+$/.test(body.amountWei)) {
       return this.json({ error: 'amountWei (integer wei) required' }, 400)
@@ -1535,6 +1652,12 @@ export class CoordinatorDO implements DurableObject {
         ?? { totalWei: '0', jobs: 0, settledWei: '0' }
       led.totalWei = (BigInt(led.totalWei) + amount).toString()
       await this.state.storage.put(key, led)
+    }
+    // Patronage accrues provisioned rep for the donor when identified —
+    // "can't run a node? fund one" is the third participation channel.
+    // 1 rep point per micro-USDC, same scale as dust conversion.
+    if (body.patron) {
+      await this.addRep(body.patron.slice(0, 128), Math.max(1, Math.floor(Number(amount / 1_000_000n))), 'patronage', undefined, 'provisioned')
     }
     await this.audit('patronage', {
       volunteerId: body.volunteerId, project: body.project,
@@ -1569,8 +1692,16 @@ export class CoordinatorDO implements DurableObject {
         const capped = headroom > 0n ? headroom : 0n
         const excess = amount - capped
         amount = capped
-        if (excess > 0n) await this.addRep(volunteerId, Math.floor(Number(excess / 1_000_000n)), 'anon-cap-conversion')
+        if (excess > 0n) await this.addRep(volunteerId, Math.floor(Number(excess / 1_000_000n)), 'anon-cap-conversion', undefined, 'provisioned')
       }
+    }
+    // Rep-tier premium — nodes with accrued points earn REP_PREMIUM_PCT on
+    // top of the job amount. The premium is paid from the same ledger, so
+    // sybil identities can't reach it: rep only accrues from real work.
+    const premPct = Number(this.env.REP_PREMIUM_PCT || '0')
+    if (premPct > 0 && amount > 0n) {
+      const rep = (await this.state.storage.get(`rep:${volunteerId}`)) as { points?: number } | undefined
+      if ((rep?.points ?? 0) >= 10) amount += (amount * BigInt(premPct)) / 100n
     }
     led.totalWei = (BigInt(led.totalWei) + amount).toString()
     led.jobs += 1
@@ -1586,7 +1717,7 @@ export class CoordinatorDO implements DurableObject {
     if (ref && (ref.jobs ?? 0) < refCap && ref.referrer !== volunteerId) {
       ref.jobs = (ref.jobs ?? 0) + 1
       await this.state.storage.put(`ref:${volunteerId}`, ref)
-      await this.addRep(ref.referrer, 1, 'referral')
+      await this.addRep(ref.referrer, 1, 'referral', undefined, 'provisioned')
     }
 
     // Reciprocity — cross-project compute co-op ledger: when a supporter of
@@ -1682,7 +1813,13 @@ export class CoordinatorDO implements DurableObject {
    *  Points are non-transferable reputation; they gate premium dispatch
    *  lanes and durable-tier admission in later phases. Negative points
    *  (jury dissents, cap conversions) subtract — floor is 0. */
-  private async addRep(id: string, points: number, reason: string, lane?: string) {
+  private async addRep(
+    id: string,
+    points: number,
+    reason: string,
+    lane?: string,
+    channel: 'performed' | 'provisioned' = 'performed',
+  ) {
     if (!points) return
     const apply = async (key: string) => {
       const rep = ((await this.state.storage.get(key)) as
@@ -1694,6 +1831,11 @@ export class CoordinatorDO implements DurableObject {
       await this.state.storage.put(key, rep)
     }
     await apply(`rep:${id}`)
+    // Two-channel rep: 'performed' = the device did the labor (full weight),
+    // 'provisioned' = the operator's fleet/patronage enabled it (diminished
+    // weight). Consumers weight rep:ch:provisioned:* at a discount — capital
+    // can't buy performed standing.
+    await apply(`rep:ch:${channel}:${id}`)
     if (lane) await apply(`rep:lane:${lane.slice(0, 32)}:${id}`)
   }
 

@@ -45,12 +45,19 @@ export interface VolunteerMeta {
   lastHeartbeat: number
 }
 
-/** Registered ranges: canonical 0-3, wp-cloud 100-103, project 200-206.
- *  Swarm 300-301 deliberately excluded — claiming them is meaningless until
- *  the durable tier exists. Out-of-range still collapses to 0 (upstream
+/** Registered ranges: canonical 0-3, wp-cloud 100-103, project 200-206,
+ *  swarm 300-301 (durable-gated at REGISTER — a non-durable claim collapses
+ *  to 0 via stripSwarmClaims). Out-of-range still collapses to 0 (upstream
  *  compat) rather than being dropped. */
 function inRegisteredRange(n: number): boolean {
-  return (n >= 0 && n <= 3) || (n >= 100 && n <= 103) || (n >= 200 && n <= 206)
+  return (n >= 0 && n <= 3) || (n >= 100 && n <= 103) || (n >= 200 && n <= 206) || (n >= 300 && n <= 301)
+}
+
+/** Swarm-tier claims require durability — strip 300+ unless the node
+ *  registered `durable: true`. Dispatch has the same gate, so this is the
+ *  registration-side mirror that keeps taskTypes honest. */
+export function stripSwarmClaims(taskTypes: number[], durable: boolean | undefined): number[] {
+  return durable ? taskTypes : taskTypes.map((n) => (n >= 300 ? 0 : n))
 }
 
 export function normalizeTaskTypes(taskTypes: unknown): number[] {
@@ -153,13 +160,20 @@ const serveResult = z.object({
   served: z.literal(true),
   bytes: z.number().int().nonnegative(),
 })
+// HUMAN_JURY — a human verdict on presented content. The job payload carries
+// {question, options[]}; the result is the chosen option index + optional
+// rationale. Attention-as-oracle: free evaluation bandwidth for juries.
+const juryResult = z.object({
+  verdict: z.number().int().nonnegative(),
+  rationale: z.string().max(500).optional(),
+})
 
 export interface JobSpec {
   result: z.ZodTypeAny
   /** 'json' = result string must JSON.parse into the schema; 'text' = the
    *  string itself is the result. */
   encoding: 'json' | 'text'
-  modelClass: 'instruct' | 'embedding' | 'fetch' | 'pin'
+  modelClass: 'instruct' | 'embedding' | 'fetch' | 'pin' | 'jury'
 }
 
 export const PROJECT_JOB: Record<number, JobSpec> = {
@@ -169,6 +183,7 @@ export const PROJECT_JOB: Record<number, JobSpec> = {
   [PROJECT.MARKET_RESEARCH]: { result: researchResult, encoding: 'json', modelClass: 'instruct' },
   [PROJECT.REPO_INDEX]: { result: indexResult, encoding: 'json', modelClass: 'embedding' },
   [PROJECT.SOCIAL_COPY]: { result: copyResult, encoding: 'json', modelClass: 'instruct' },
+  [PROJECT.HUMAN_JURY]: { result: juryResult, encoding: 'json', modelClass: 'jury' },
   [PROJECT.WEB_FETCH]: { result: fetchResult, encoding: 'json', modelClass: 'fetch' },
 }
 

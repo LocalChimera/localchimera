@@ -126,3 +126,35 @@ export function parseSealed(envValue?: string): Record<string, string> {
     return {}
   }
 }
+
+/**
+ * Result sandboxing — the instruction-strip half of the sandboxing contract
+ * (schema-validate happens in registry.validateJobResult; consumers quote-
+ * embed rather than concat). Strips lines that look like prompt-injection
+ * payloads riding back through a node result — role markers and imperative
+ * override phrasing. Conservative: only whole-line/leading matches are cut,
+ * and the function returns the list of removed lines for the audit record.
+ */
+const INJECTION_LINE = /^\s*(?:\[[a-z ]+\]\s*)?(?:system|assistant|user)\s*:|^\s*(?:ignore|disregard|forget)\b.{0,40}\b(?:previous|prior|above|all)\b.{0,20}\b(?:instructions?|prompts?|context)\b/i
+
+export function stripInstructions(result: string): { text: string; stripped: number } {
+  const lines = result.split('\n')
+  const kept: string[] = []
+  let stripped = 0
+  for (const line of lines) {
+    if (INJECTION_LINE.test(line)) stripped++
+    else kept.push(line)
+  }
+  return { text: kept.join('\n'), stripped }
+}
+
+/** True when the result text contains a sealed value — meaning the node saw
+ *  secret material it should never have had (it leaked through the payload
+ *  path or the node scanned its own environment). Treated as a killswitch:
+ *  no credit, node banned, audit event. */
+export function leaksSealed(result: string, sealed: Record<string, string>): string | null {
+  for (const [name, value] of Object.entries(sealed)) {
+    if (typeof value === 'string' && value.length >= 8 && result.includes(value)) return name
+  }
+  return null
+}
