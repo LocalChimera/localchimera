@@ -40,6 +40,75 @@ def dist(a, b):
     return math.sqrt((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2)
 
 
+def _build_module_layout(hub, modules):
+    """Build satellite chips and hub-and-spoke connectors for the architecture scene.
+
+    Args:
+        hub: The central hub VMobject (must have .get_center()).
+        modules: Iterable of (name, color, position) tuples.
+
+    Returns:
+        Tuple of (satellites VGroup, spokes VGroup).
+
+    Raises:
+        ValueError: If modules is empty or hub center cannot be computed.
+    """
+    if not modules:
+        raise ValueError("modules must contain at least one (name, color, pos) tuple")
+
+    try:
+        hub_center = hub.get_center()
+    except Exception as exc:
+        raise ValueError(f"hub must expose get_center(), got error: {exc}") from exc
+
+    satellites = VGroup()
+    spokes = VGroup()
+    for name, color, pos in modules:
+        sat = chip(name, color, width=2.0, height=0.55)
+        sat.move_to(pos)
+        satellites.add(sat)
+
+        d = dist(hub_center, sat.get_center()) or 1
+        start = hub_center + (pos - hub_center) * (0.9 / d)
+        end = sat.get_center() + (hub_center - sat.get_center()) * (0.1 / d)
+        spoke = Line(start, end, color=color, stroke_width=1.2)
+        spokes.add(spoke)
+
+    return satellites, spokes
+
+
+def _build_architecture_scene_elements():
+    """Build the hub, module layout, satellites, and spokes for the architecture scene.
+
+    Returns:
+        Tuple of (hub_group, satellites, spokes, modules).
+    """
+    hub = Circle(radius=0.9, color=MAGENTA, fill_opacity=0.15, stroke_width=2)
+    hub_symbol = chimera_symbol(scale=0.5, color=MAGENTA)
+    hub_symbol.move_to(hub.get_center())
+    hub_label = Text("Chimera", font_size=LABEL, color=MAGENTA, font=MONO)
+    hub_label.next_to(hub, DOWN, buff=0.15)
+    hub_group = VGroup(hub, hub_symbol, hub_label)
+    hub_group.move_to(ORIGIN)
+
+    modules = [
+        ("AuthService", ORANGE, UP * 2.6),
+        ("Hypercore\nStore", GREEN, UP * 1.3 + LEFT * 3.2),
+        ("PearP2P", PURPLE, UP * 1.3 + RIGHT * 3.2),
+        ("Multisig\nManager", MAGENTA, LEFT * 2.8),
+        ("Wallet\nManager", "#FF00AA", RIGHT * 2.8),
+        ("Time\nScheduler", BLUE, DOWN * 1.3 + LEFT * 3.2),
+        ("Task\nMonitor", CYAN, DOWN * 1.3 + RIGHT * 3.2),
+        ("QVAC\nInference", GREEN, DOWN * 2.3 + LEFT * 1.6),
+        ("Inference\nRouter", "#FF00AA", DOWN * 2.3 + RIGHT * 1.6),
+        ("Miner\nManager", ORANGE, DOWN * 1.3),
+        ("WebServer", PURPLE, DOWN * 2.9),
+    ]
+
+    satellites, spokes = _build_module_layout(hub, modules)
+    return hub_group, satellites, spokes, modules
+
+
 def chimera_symbol(scale=1.0, color=BLUE):
     """Convergence chimera: disparate stars and DNA strands merging
     into a single unified organism. Three distinct natures, one body."""
@@ -289,9 +358,12 @@ class Scene2_BigIdea(Scene):
 
 
 class Scene3_Architecture(Scene):
-    def construct(self):
-        self.camera.background_color = BG
+    def _build_architecture_scene(self):
+        """Build the architecture deep-dive scene elements.
 
+        Returns:
+            Tuple of (header, hub_group, satellites, spokes, init_step, modules).
+        """
         header = Text("Architecture Deep Dive", font_size=HEADING, color=CYAN, font=MONO)
         header.to_edge(UP, buff=0.4)
 
@@ -317,21 +389,17 @@ class Scene3_Architecture(Scene):
             ("WebServer", PURPLE, DOWN * 2.9),
         ]
 
-        satellites = VGroup()
-        spokes = VGroup()
-        for name, color, pos in modules:
-            sat = chip(name, color, width=2.0, height=0.55)
-            sat.move_to(pos)
-            satellites.add(sat)
-
-            d = dist(hub.get_center(), sat.get_center()) or 1
-            start = hub.get_center() + (pos - hub.get_center()) * (0.9 / d)
-            end = sat.get_center() + (hub.get_center() - sat.get_center()) * (0.1 / d)
-            spoke = Line(start, end, color=color, stroke_width=1.2)
-            spokes.add(spoke)
+        satellites, spokes = _build_module_layout(hub, modules)
 
         init_step = Text("initialize() sequence", font_size=CODE, color=WHITE, font=MONO)
         init_step.to_edge(DOWN, buff=0.4)
+
+        return header, hub_group, satellites, spokes, init_step, modules
+
+    def construct(self):
+        self.camera.background_color = BG
+
+        header, hub_group, satellites, spokes, init_step, modules = self._build_architecture_scene()
 
         self.play(Write(header), run_time=0.8)
         self.play(FadeIn(hub_group), run_time=0.6)

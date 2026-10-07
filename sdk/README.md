@@ -8,11 +8,17 @@ All tasking network providers mine directly into the **Chimera protocol multisig
 
 1. **Mining** — user's device completes tasks on tasking networks (Golem, Mysterium, Anyone Protocol, BTFS, BTT AI, Casper). All rewards flow to the protocol multisig.
 2. **Monthly sweep** — the protocol multisig distributes funds to:
-   - **Machine owner** Web3Auth wallet (user's embedded wallet via Web3Auth)
-   - **App developer** Web3Auth wallet (your address, set in SDK options)
+   - **Machine owner** wallet (user's Widespread wallet or Logos payout identity)
+   - **App developer** wallet (your address, set in SDK options)
    - Split based on `revenueSplit` config (default 70/30)
 
-Individual Web3Auth wallets are **never used by providers directly** — they only receive funds via the monthly sweep from the protocol multisig.
+In the Widespread integration the browser node runs **provider-less** — no
+botchain/RH Chain escrow writes — and attributes work to the user's Logos
+payout identity. Settlement and coordination use Logos; the legacy
+botchain escrow path below applies only to the deprecated `sendTask`
+EVM fallback.
+
+Individual wallets are **never used by providers directly** — they only receive funds via the monthly sweep from the protocol multisig.
 
 ## What the SDK gives your app
 
@@ -43,7 +49,61 @@ Or copy the `sdk/` folder into your project.
 
 ## Quick Start
 
-### React — with Web3Auth wallet integration
+### React — with Widespread wallet (default)
+
+The default wallet backend is **Widespread** — a client-side vault wallet
+(extension or `widespread.fyi` embed popup). Users authenticate with their
+own keys; the SDK receives an offline-verifiable ES256K JWT + EIP-1193
+provider. No Web3Auth config, no server-side verify endpoint, no shared
+client ID. Resource-sharing earnings settle on **Logos**, not botchain —
+the browser node runs provider-less and attributes work to the user's
+payout identity.
+
+```jsx
+import { ChimeraWeb3AuthProvider, useChimera } from '@localchimera/sdk';
+
+// The provider supplies the shared wagmi/query context the hook needs
+// (name is historical — the widespread path never touches Web3Auth).
+function Root() {
+  return (
+    <ChimeraWeb3AuthProvider>
+      <App />
+    </ChimeraWeb3AuthProvider>
+  );
+}
+
+function App() {
+  const chimera = useChimera({
+    wallet: 'widespread', // default — 'web3auth' keeps the legacy MPC path
+    appDeveloperEVM: '0xYourEvmWalletAddressHere',
+    revenueSplit: { machineOwner: 0.70, appDeveloper: 0.30 },
+  });
+
+  return (
+    <div>
+      {!chimera.walletConnected && (
+        <button onClick={chimera.connectWallet}>Connect Wallet</button>
+      )}
+      {chimera.walletConnected && !chimera.consentGiven && (
+        <button onClick={chimera.giveConsent}>Enable Mining</button>
+      )}
+      {chimera.consentGiven && (
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button onClick={chimera.start} disabled={chimera.status.running}>Start</button>
+          <button onClick={chimera.stop} disabled={!chimera.status.running}>Stop</button>
+          <button onClick={chimera.revokeConsent}>Revoke</button>
+        </div>
+      )}
+    </div>
+  );
+}
+```
+
+`connectWallet()` opens the Widespread popup (or uses the installed
+extension's injected provider) — no Web3Auth config, client ID, or
+server-side verify endpoint involved.
+
+### React — with Web3Auth wallet integration (legacy)
 
 The SDK ships with `ChimeraWeb3AuthProvider` — a pre-configured Web3Auth provider. It enables social login (Google, email, guest) and auto-generates embedded wallets on login. Wrap your app and call the hook:
 
@@ -86,11 +146,17 @@ function App() {
 }
 ```
 
-**Social login:** `connectWallet()` triggers Web3Auth's free PnP modal with Google, email, and guest options. An embedded wallet is auto-created on first login — no browser extension required.
+> **Deprecated.** The Web3Auth path requires a shared client ID, a
+> server-side `/web3auth/verify` endpoint, and auto-creates a custodial MPC
+> wallet on login — none of which apply to the Widespread path. Kept for
+> backward compatibility only; new integrations should use
+> `wallet: 'widespread'` (the default).
 
-**Protocol keys:** The SDK uses a shared Web3Auth Client ID. You can override it with the `VITE_WEB3AUTH_CLIENT_ID` environment variable.
+**Social login (legacy):** `connectWallet()` triggers Web3Auth's free PnP modal with Google, email, and guest options. An embedded wallet is auto-created on first login — no browser extension required.
 
-**Third-party domains:** Web3Auth works on any domain automatically via the configured Client ID.
+**Protocol keys (legacy):** The SDK uses a shared Web3Auth Client ID. You can override it with the `VITE_WEB3AUTH_CLIENT_ID` environment variable.
+
+**Third-party domains (legacy):** Web3Auth works on any domain automatically via the configured Client ID.
 
 That's it. Your app does **not** collect wallet addresses, show earnings, or handle revenue splits — the Chimera dashboard handles all of that.
 
@@ -127,7 +193,14 @@ await sdk.start();
 
 ## Task dispatch policy
 
-`useChimera().sendTask(task)` creates an on-chain job through the `ChimeraCoordinator` contract and lets you choose who can execute it:
+`useChimera().sendTask(task)` creates an on-chain job through the `ChimeraCoordinator` contract and lets you choose who can execute it.
+
+> **Legacy EVM escrow.** `sendTask` writes escrow to the botchain
+> coordinator contract and requires the caller's wallet to be connected to
+> that chain. The Widespread integration settles on **Logos** instead —
+> `sendTask` remains available for backward compatibility with existing
+> deployments, but new integrations should route task payment through the
+> Logos-native path rather than `sendTask` escrow.
 
 | Policy | Constant | Default | Escrow / dispute | Fallback |
 |--------|----------|---------|------------------|----------|
@@ -319,7 +392,7 @@ await sdk.revokeAccessSession(sessionId);  // revoke early
          │
 ┌────────▼────────┐
 │  Protocol       │  ← monthly sweep → machine owner + app developer
-│  Multisig       │    Web3Auth wallets (EVM only)
+│  Multisig       │    payout wallets (Logos-settled in Widespread mode)
 └─────────────────┘
 ```
 

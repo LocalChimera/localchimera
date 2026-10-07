@@ -33,5 +33,30 @@ new_sqlite_classes = ["CoordinatorDO"]
 #   COORDINATOR_PRIVATE_KEY — task key; COORDINATOR_ROLE on the escrow
 #     contract, funded with a little Base ETH for gas. Never receives
 #     payments (escrow releases to SETTLEMENT_ADDRESS baked into the contract).
-#   DISPATCH_AUTH_TOKEN    — authenticates POST /jobs (direct job injection)
-#   ADMIN_TOKEN            — authenticates POST /settle + ledger export
+#   DISPATCH_AUTH_TOKEN    — authenticates POST /jobs + /jobs/batch +
+#     /v1/chat/completions + /patronage (any project/site)
+#   PROJECT_TOKENS         — JSON {"<slug>": "<token>"}: per-project dispatch tokens;
+#     a project token may only submit jobs for its own slug
+#   ADMIN_TOKEN            — authenticates POST /settle + /pools/unpause + GET /audit
+#   SEALED_VALUES          — JSON {"<name>": "<secret>"}: redacted from payloads pre-dispatch
+#   REP_WEBHOOK_URL        — optional rep-event webhook (delta-git bridge)
+#
+# [vars] (non-secret, set inline above if desired):
+#   PRICE_TABLE            — JSON {"<taskType>": "<microUSDC>"} default job prices
+#   PROJECT_BUDGETS        — JSON {"<slug>": "<wei>"} pool spend caps (breach → pause)
+#   ANON_CAP_WEI           — anonymous (no-DID) lifetime payout cap; excess → rep
+#   MIN_PAYOUT_WEI         — dust→rep conversion threshold at /settle
+#   REFERRAL_JOB_CAP       — referral rep cap per referred node (default 50)
+#   BASE_RPC_URLS          — comma-separated RPC failover list
+#   CANARY_INTERVAL_MS     — honesty-canary cadence (default 1800000)
+#   SHARD_KEY              — DO shard name (default 'global')
+#   LANE_PREMIUMS          — JSON {"<domain>": <multiplier×100>} on PRICE_TABLE
+#   AGENT_DAILY_QUOTA      — per-identity daily job cap (unset = unlimited)
+#   POW_DIFFICULTY         — hashcash leading-zeros required on /jobs (0 = off)
+#   X402_PAYEE             — payee address; enables 402 challenge on unpaid jobs
+#   X402_USDC              — USDC contract (default Base USDC)
+#   JURY_QUORUM            — siblings needed before group adjudication (default 3)
+#   ENS_RPC                — mainnet RPC for /.well-known/ens content-hash lookup
+#   PENDING_TTL_MS         — undispatchable-job expiry (default 3600000)
+#   VERIFY_RATE_PCT        — % of pin jobs spot-checked on a second node (0 = off)
+#   REFERRAL_TARGET        — landing URL for /r/<volunteerId> referral redirects

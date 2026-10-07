@@ -28,6 +28,7 @@ import { http, getContract, keccak256, toUtf8Bytes, parseEther, zeroAddress, dec
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ConnectKitProvider } from 'connectkit';
 import { fetchWeb3AuthConfig, fetchWalletJwt, createMpcWalletFromJwt } from './web3auth-helpers.js';
+import { connectWidespreadWallet } from './widespread-adapter.js';
 import { checkForUpdates, onUpdateAvailable, getSDKVersion } from './core/update-checker.js';
 import { TASK_TYPE_BOTCHAIN } from './core/task-types.js';
 
@@ -109,6 +110,9 @@ function useChimeraInner(opts = {}) {
   const appDeveloperEVM = opts.appDeveloperEVM || null;
   const revenueSplit = opts.revenueSplit || { machineOwner: 0.70, appDeveloper: 0.30 };
   const mpcBaseUrl = opts.mpcBaseUrl || (typeof window !== 'undefined' ? `${window.location.origin}/serviceworker` : undefined);
+  // Wallet backend: 'widespread' (default — client-side vault, offline-verifiable
+  // JWT, Logos settlement) or 'web3auth' (legacy MPC path, kept for compat).
+  const walletBackend = opts.wallet || 'widespread';
 
   // Load Web3Auth config from backend
   useEffect(() => {
@@ -187,6 +191,28 @@ function useChimeraInner(opts = {}) {
   }, [fetchStatus]);
 
   const connectWallet = useCallback(async (chain = 'evm') => {
+    // Widespread path — extension provider or embed popup; no Web3Auth config
+    // needed (the JWT is self-verifiable). Settlement is Logos-native: the
+    // returned provider is never attached to a BrowserNode escrow path.
+    if (walletBackend === 'widespread') {
+      try {
+        const { provider: wspProvider, address, jwt, user } = await connectWidespreadWallet({
+          appName: opts.appName,
+          embedOrigin: opts.embedOrigin,
+        });
+        setWalletState({
+          connected: true,
+          walletAddress: address,
+          provider: wspProvider,
+          chain: 'evm',
+          walletAdapterAddress: address,
+          user: { ...user, jwt },
+        });
+        return { success: true, address, chain: 'evm', wallet: 'widespread' };
+      } catch (e) {
+        return { success: false, error: e.message };
+      }
+    }
     if (!web3AuthConfig) return { success: false, error: 'Web3Auth config not loaded' };
     try {
       if (typeof window !== 'undefined') {
@@ -199,7 +225,7 @@ function useChimeraInner(opts = {}) {
     } catch (e) {
       return { success: false, error: e.message };
     }
-  }, [web3AuthConfig, connect]);
+  }, [walletBackend, web3AuthConfig, connect, opts.appName, opts.embedOrigin]);
 
   const connectWalletWithJwt = useCallback(async ({ jwt, sub, address, chain = 'evm' }) => {
     if (!web3AuthConfig) return { success: false, error: 'Web3Auth config not loaded' };
@@ -305,7 +331,8 @@ function useChimeraInner(opts = {}) {
     return { success: true };
   }, [walletState.chain, disconnectEvm, fetchStatus]);
 
-  const ready = !!web3AuthConfig;
+  // Widespread mode needs no backend config — the embed JWT is self-verifiable.
+  const ready = walletBackend === 'widespread' || !!web3AuthConfig;
   const walletConnected = walletState.connected && !!walletState.walletAddress;
   const walletAddress = walletState.walletAddress;
   const provider = walletState.provider;
@@ -348,7 +375,14 @@ function useChimeraInner(opts = {}) {
         const { BrowserNode } = await import('@localchimera/browser-sdk');
         let node;
         if (walletState.chain === 'evm') {
-          node = new BrowserNode({ evmProvider: walletState.provider, evmAddress: walletAddress });
+          if (walletBackend === 'widespread') {
+            // Logos settlement — no evmProvider, so upstream's botchain
+            // escrow writes never run; the coordinator attributes work to
+            // the user's pairwise/payout identity.
+            node = new BrowserNode({ payoutAccount: walletState.user?.id || walletAddress });
+          } else {
+            node = new BrowserNode({ evmProvider: walletState.provider, evmAddress: walletAddress });
+          }
         } else {
           return { success: false, error: 'Browser mode requires an EVM wallet' };
         }

@@ -1,0 +1,11 @@
+{
+  "manifest_version": 3,
+  "name": "Chimera Compute",
+  "version": "0.1.0",
+  "description": "Earn by sharing spare compute with the Widespread visitor-compute pool. Consent-first; revokes cleanly.",
+  "permissions": ["storage", "alarms"],
+  "host_permissions": [],
+  "background": { "service_worker": "background.js" },
+  "action": { "default_popup": "popup.html", "default_title": "Chimera Compute" },
+  "icons": {}
+}

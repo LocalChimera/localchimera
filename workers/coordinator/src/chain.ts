@@ -38,26 +38,47 @@ export const ESCROW_ABI = [
   },
 ] as const
 
+/** RPC failover — BASE_RPC_URLS is a comma-separated list; BASE_RPC_URL is
+ *  the single-URL fallback. pollChain rotates rpcIndex on transport errors. */
+export function rpcUrls(env: { BASE_RPC_URL: string; BASE_RPC_URLS?: string }): string[] {
+  const list = (env.BASE_RPC_URLS || env.BASE_RPC_URL || '')
+    .split(',').map((s) => s.trim()).filter(Boolean)
+  return list.length ? list : [env.BASE_RPC_URL]
+}
+
 export function makeClients(env: {
   BASE_RPC_URL: string
+  BASE_RPC_URLS?: string
   ESCROW_CONTRACT: string
   COORDINATOR_PRIVATE_KEY?: string
-}) {
-  const isTestnet = env.BASE_RPC_URL.includes('sepolia')
+}, rpcIndex = 0) {
+  const urls = rpcUrls(env)
+  const url = urls[rpcIndex % urls.length]
+  const isTestnet = url.includes('sepolia')
   const chain = isTestnet ? baseSepolia : base
-  const pub = createPublicClient({ chain, transport: http(env.BASE_RPC_URL) })
+  const pub = createPublicClient({ chain, transport: http(url) })
   const contract = env.ESCROW_CONTRACT as Address
 
   const account = env.COORDINATOR_PRIVATE_KEY
     ? privateKeyToAccount(env.COORDINATOR_PRIVATE_KEY as Hex)
     : null
   const wallet = account
-    ? createWalletClient({ account, chain, transport: http(env.BASE_RPC_URL) })
+    ? createWalletClient({ account, chain, transport: http(url) })
     : null
 
-  return { pub, wallet, account, contract, chain }
+  return { pub, wallet, account, contract, chain, url, urlCount: urls.length }
 }
 
 export function resultHash(resultText: string): Hex {
   return keccak256(toHex(resultText))
+}
+
+/** Sign the dispatch envelope so nodes can verify a job came from this
+ *  coordinator (node-side verification is opt-in — the signature is always
+ *  attached once COORDINATOR_PRIVATE_KEY is set). */
+export function signDispatch(
+  account: { signMessage(args: { message: string }): Promise<Hex> },
+  jobId: string,
+): Promise<Hex> {
+  return account.signMessage({ message: `chimera-job:${jobId}` })
 }

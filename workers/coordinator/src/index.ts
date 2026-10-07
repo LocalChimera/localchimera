@@ -8,6 +8,12 @@ export { CoordinatorDO }
 
 interface Env {
   COORDINATOR: DurableObjectNamespace
+  /** Coordinator sharding groundwork — unset means the single 'global'
+   *  shard. When volunteer count outgrows one DO, deploy additional workers
+   *  with distinct SHARD_KEYs (e.g. per project-range) and point each
+   *  deployment's ingress at its shard. Ledgers are per-shard; settle
+   *  aggregates across deployments. */
+  SHARD_KEY?: string
 }
 
 // Cheap connect-rate limiting — the DO is the real boundary, this just keeps
@@ -27,6 +33,6 @@ export default {
       hits.push(now)
       connects.set(ip, hits)
     }
-    return env.COORDINATOR.get(env.COORDINATOR.idFromName('global')).fetch(req)
+    return env.COORDINATOR.get(env.COORDINATOR.idFromName(env.SHARD_KEY || 'global')).fetch(req)
   },
 }

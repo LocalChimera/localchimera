@@ -1,0 +1,24 @@
+[Unit]
+Description=Chimera durable volunteer node
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=chimera
+Environment=CHIMERA_COORDINATOR=wss://coordinator.widespread.fyi
+Environment=CHIMERA_PROJECT=
+Environment=CHIMERA_STATE=/var/lib/chimera-node
+WorkingDirectory=/opt/chimera-node
+ExecStart=/usr/bin/node /opt/chimera-node/node.mjs
+Restart=always
+RestartSec=10
+# Hardening — the node needs outbound 443 only
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/chimera-node
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

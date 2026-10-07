@@ -108,6 +108,13 @@ export interface BrowserNodeOptions {
   evmAddress?: string;
   /** Optional Botchain ChimeraCoordinator address for hybrid (payVolunteer) jobs. */
   coordinatorContract?: string;
+  /**
+   * Logos-native payout identity (e.g. a LEZ account id). When set, the node
+   * runs provider-less — no EVM escrow writes — and reports this id as the
+   * provider/volunteer identity so coordinator-side settlement lands on the
+   * Logos account instead of botchain contracts.
+   */
+  payoutAccount?: string;
 }
 
 export class BrowserNode {
@@ -168,7 +175,11 @@ export class BrowserNode {
     providerOrOptions: any | BrowserNodeOptions,
   ) {
     let options: BrowserNodeOptions;
-    if (providerOrOptions && typeof providerOrOptions === 'object' && 'evmProvider' in providerOrOptions) {
+    if (
+      providerOrOptions && typeof providerOrOptions === 'object' &&
+      ('evmProvider' in providerOrOptions || 'evmAddress' in providerOrOptions ||
+        'payoutAccount' in providerOrOptions || 'coordinatorContract' in providerOrOptions)
+    ) {
       options = providerOrOptions as BrowserNodeOptions;
     } else {
       options = { evmProvider: providerOrOptions };
@@ -176,8 +187,10 @@ export class BrowserNode {
 
     this.provider = null;
     this.publicKeyHex = '';
-    this.accountHash = '';
-    this.accountHashHex = '';
+    // Logos payout identity — when supplied, replaces the Casper-style
+    // account hash as the coordinator-facing provider identity.
+    this.accountHash = options.payoutAccount ?? '';
+    this.accountHashHex = this.accountHash.replace('account-hash-', '');
     this.evmProvider = options.evmProvider || null;
     this.evmAddress = options.evmAddress || '';
     this.coordinatorContract = options.coordinatorContract ||

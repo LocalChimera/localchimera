@@ -13,20 +13,28 @@
  * JOB_DISPATCH → JOB_RESULT | JOB_REJECTED.
  *
  * Persistence layout (state.storage):
- *   handled:<jobId>   → 1 | 'expired' | 'oversize' | 'reverted:<err>'
+ *   handled:<jobId>   → 1 | 'expired' | 'oversize' | 'reverted:<err>' | 'lint:<name>' | 'invalid-result'
  *   pending:<jobId>   → PendingJob
  *   assigned:<jobId>  → { volunteerId, at }
  *   result:<jobId>    → { volunteerId, result, at, source }
  *   ledger:<volId>    → { totalWei, jobs, settledWei }
+ *   ledger:site:<s>   → site host share (10%, additive)
+ *   ledger:project:<p>→ project pool share (10%, additive)
+ *   ref:<volId>       → { referrer, project, at } — record-only in P1
  *   lastBlock         → bigint cursor for getLogs
  * Volunteer state lives on ws attachments (hibernation-safe) + the
  * in-memory registry rebuilt from them on wake.
  */
 
 import type { VolunteerMeta } from './registry'
-import { normalizeTaskTypes, selectVolunteer } from './registry'
-import { ESCROW_ABI, makeClients, resultHash } from './chain'
+import { normalizeTaskTypes, selectVolunteer, validateJobResult, PROJECT, CANONICAL } from './registry'
+import { lintPayload, classificationOk, redactPayload, parseSealed } from './lint'
+import { ESCROW_ABI, makeClients, resultHash, signDispatch } from './chain'
+import { verifyMessage, verifyTypedData } from 'viem'
 import type { Hex } from 'viem'
+
+/** Base mainnet USDC — the default x402 payment asset. */
+const USDC_BASE = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'
 
 interface Env {
   COORDINATOR: DurableObjectNamespace
@@ -35,6 +43,53 @@ interface Env {
   VOLUNTEER_TOKEN: string
   COORDINATOR_PRIVATE_KEY?: string
   DISPATCH_AUTH_TOKEN?: string
+  /** Per-project dispatch tokens: JSON {"<slug>": "<token>"}. A project
+   *  token may only submit jobs for its own slug — cross-project forgery
+   *  is impossible without the global DISPATCH_AUTH_TOKEN. */
+  PROJECT_TOKENS?: string
+  /** JSON {"<taskType>": "<microUSDC>"} — default price when amountWei absent */
+  PRICE_TABLE?: string
+  /** JSON {"<slug>": "<wei>"} — per-project spend budgets; breach pauses the pool */
+  PROJECT_BUDGETS?: string
+  /** JSON {"<name>": "<value>"} — sealed values redacted from payloads pre-dispatch */
+  SEALED_VALUES?: string
+  /** Anonymous (no-DID) lifetime payout cap in wei; excess converts to rep */
+  ANON_CAP_WEI?: string
+  /** Dust→rep threshold at settle (default 0 = disabled) */
+  MIN_PAYOUT_WEI?: string
+  /** Referral rep cap — jobs per referred node that earn rep (default 50) */
+  REFERRAL_JOB_CAP?: string
+  /** Optional webhook — rep events POSTed fire-and-forget (delta-git bridge) */
+  REP_WEBHOOK_URL?: string
+  /** Comma-separated RPC list; rotates on transport failure */
+  BASE_RPC_URLS?: string
+  /** Honesty-canary cadence (default 30 min) */
+  CANARY_INTERVAL_MS?: string
+  /** JSON {"<domain>": <multiplier×100>} — lane premiums on PRICE_TABLE defaults */
+  LANE_PREMIUMS?: string
+  /** Per-identity daily job cap (0/unset = unlimited) */
+  AGENT_DAILY_QUOTA?: string
+  /** Hashcash-style PoW gate on /jobs — sha256(payload:nonce) needs this many
+   *  leading zero hex digits when >0. Set only if submissions get abused. */
+  POW_DIFFICULTY?: string
+  /** x402 payee address — when set, priced jobs (PRICE_TABLE>0, no amountWei)
+   *  return 402 with an accepts spec until X-PAYMENT verifies (EIP-3009) */
+  X402_PAYEE?: string
+  /** USDC contract for x402 verification (default = Base USDC) */
+  X402_USDC?: string
+  /** Bounded jury quorum — siblings needed before adjudication (default 3) */
+  JURY_QUORUM?: string
+  /** Optional mainnet RPC for ENS content-hash resolution */
+  ENS_RPC?: string
+  /** Pending-job TTL — an undispatchable job (no volunteer claims its
+   *  taskType) expires as 'no-capacity' instead of sitting forever
+   *  (default 1h). */
+  PENDING_TTL_MS?: string
+  /** % of STORAGE-pin results re-dispatched to a second node for CID
+   *  spot-checking — verifier-hook groundwork (default 0 = off). */
+  VERIFY_RATE_PCT?: string
+  /** Referral landing target for /r/<volunteerId> redirects. */
+  REFERRAL_TARGET?: string
   ADMIN_TOKEN?: string
   POLL_INTERVAL_MS?: string
   JOB_RESULT_TIMEOUT_MS?: string
@@ -49,6 +104,15 @@ interface PendingJob {
   source: 'chain' | 'direct'
   consumer?: string
   site?: string            // wp-cloud site tag — prefer that site's own visitors
+  project?: string         // project:<slug> pool — prefer that pool's supporters
+  classification?: string  // 'PUBLIC' only until the INTERNAL lane exists (P3)
+  difficulty?: number      // >=2 prefers high-capability nodes
+  domain?: string          // specialization lane hint
+  modelClass?: string      // 'instruct' | 'embedding' | ...
+  priority?: 'interactive' | 'batch'  // interactive dispatches ahead of batch under contention
+  group?: string           // redundant-dispatch group id — sibling jobs share it
+  resultToken?: string     // bearer token for /results/<id>?token= — lets batch consumers read their own result without ADMIN_TOKEN
+  verifyOf?: string        // set on spot-check replica jobs — result compared against the original
   deadline?: number // unix seconds; 0/undefined = none
   since: number
 }
@@ -62,9 +126,31 @@ interface JobEnvelope {
   capabilities?: Record<string, unknown>
   networks?: string[]
   site?: string
+  project?: string
+  referrer?: string
+  did?: string
+  sig?: string
+  durable?: boolean
+  shardCapacity?: number
   status?: string
   result?: string
   reason?: string
+}
+
+interface DirectJobBody {
+  payload?: string
+  taskType?: number
+  amountWei?: string
+  site?: string
+  project?: string
+  classification?: string
+  difficulty?: number
+  domain?: string
+  modelClass?: string
+  priority?: string
+  group?: string           // set internally for jury-redundant siblings
+  redundant?: number       // N sibling dispatches in one group (consumer aggregates)
+  verifyOf?: string        // set internally on spot-check replica jobs
 }
 
 const MAX_RESULT_BYTES = 256 * 1024
@@ -76,6 +162,9 @@ export class CoordinatorDO implements DurableObject {
   /** jobId → resolve — in-memory; the alarm's flushTimeouts redispatches
    *  anything still pending after a hibernate/wake cycle. */
   private awaiting = new Map<string, { resolve: (ok: boolean) => void }>()
+  /** Multi-RPC rotation cursor — advances on transport failure. */
+  private rpcIdx = 0
+  private migrated = false
 
   constructor(state: DurableObjectState, env: Env) {
     this.state = state
@@ -97,12 +186,23 @@ export class CoordinatorDO implements DurableObject {
       return this.handleWsUpgrade(url)
     }
     if (url.pathname === '/status') {
+      // ?project=<slug> → counts for just that pool (power-card surfaces
+      // poll this — cheaper than shipping byProject for every pool).
+      const proj = url.searchParams.get('project')
+      const pool = proj ? [...this.registry.values()].filter((v) => v.project === proj) : null
       return this.json({
-        volunteers: this.registry.size,
-        idle: [...this.registry.values()].filter((v) => v.status === 'idle').length,
-        byTaskType: this.countByTaskType(),
+        volunteers: pool ? pool.length : this.registry.size,
+        idle: (pool ?? [...this.registry.values()]).filter((v) => v.status === 'idle').length,
+        byTaskType: this.countByTaskType(pool ?? undefined),
+        byProject: this.countByProject(),
         pendingJobs: (await this.keys('pending:')).length,
       })
+    }
+    if (url.pathname === '/earnings' && url.searchParams.get('project')) {
+      const led = (await this.state.storage.get(`ledger:project:${url.searchParams.get('project')}`)) as
+        | { totalWei: string; jobs: number; settledWei: string }
+        | undefined
+      return this.json(led ?? { totalWei: '0', jobs: 0, settledWei: '0' })
     }
     if (url.pathname === '/earnings' && url.searchParams.get('site')) {
       const led = (await this.state.storage.get(`ledger:site:${url.searchParams.get('site')}`)) as
@@ -116,19 +216,246 @@ export class CoordinatorDO implements DurableObject {
         | undefined
       return this.json(led ?? { totalWei: '0', jobs: 0, settledWei: '0' })
     }
+    if (url.pathname.startsWith('/r/')) {
+      // Referral redirect — /r/<volunteerId> lands on REFERRAL_TARGET with
+      // ?ref=<id>; the target page's visitor-node picks it into REGISTER.
+      const ref = url.pathname.slice(3).slice(0, 64)
+      const target = this.env.REFERRAL_TARGET || '/'
+      const u = new URL(target, 'https://x.invalid')
+      u.searchParams.set('ref', ref)
+      await this.audit('referral.click', { ref })
+      return new Response(null, { status: 302, headers: { location: u.pathname + u.search } })
+    }
+    if (url.pathname.startsWith('/badge/')) {
+      // Live badge feed — delta-git power-cards and shields.io endpoint
+      // badges poll this. Public, cheap, no auth.
+      const project = url.pathname.slice(7)
+      const pool = [...this.registry.values()].filter((v) => v.project === project)
+      const led = (await this.state.storage.get(`ledger:project:${project}`)) as
+        | { totalWei: string; jobs: number } | undefined
+      return this.json({
+        project,
+        supporters: pool.length,
+        idle: pool.filter((v) => v.status === 'idle').length,
+        jobsSettled: led?.jobs ?? 0,
+        earnedWei: led?.totalWei ?? '0',
+        paused: !!(await this.state.storage.get(`paused:project:${project}`)),
+      })
+    }
+    if (url.pathname === '/leaderboard') {
+      // Top rep holders, optionally scoped to a project lane. Public.
+      const project = url.searchParams.get('project')
+      const prefix = project ? `rep:lane:${project}:` : 'rep:'
+      const rows: { id: string; rep: number }[] = []
+      for (const [k, v] of await this.state.storage.list({ prefix, limit: 500 })) {
+        const rec = v as { points?: number } | undefined
+        // skip lane keys when listing global rep — they contain two extra
+        // ':' segments and would double-count ids
+        const id = k.slice(prefix.length)
+        if (!project && id.includes(':')) continue
+        if (typeof rec?.points === 'number') rows.push({ id, rep: rec.points })
+      }
+      rows.sort((a, b) => b.rep - a.rep)
+      return this.json({ project: project ?? null, top: rows.slice(0, 50) })
+    }
+    if (url.pathname === '/rep' && url.searchParams.get('id')) {
+      const id = url.searchParams.get('id')!
+      const rep = (await this.state.storage.get(`rep:${id}`)) as
+        | { points: number; jobs: number; referrals: number } | undefined
+      const trust = (await this.state.storage.get(`trust:${id}`)) as number | undefined
+      return this.json({ id, ...(rep ?? { points: 0, jobs: 0, referrals: 0 }), trust: trust ?? 0 })
+    }
+    if (url.pathname === '/audit') {
+      // Hash-chained audit export — admin only.
+      if (!this.bearerOk(req, this.env.ADMIN_TOKEN)) return this.json({ error: 'unauthorized' }, 401)
+      const last = (await this.state.storage.get('audit:last')) as
+        | { seq: number; hash: string } | undefined
+      const events = await this.state.storage.list({ prefix: 'audit:', limit: 5000 })
+      events.delete('audit:last')
+      return this.json({ head: last ?? null, events: [...events.values()] })
+    }
+    if (url.pathname === '/reciprocity') {
+      // Cross-project co-op ledger — recip:A:B = wei earned by A-supporters
+      // serving B-jobs. Directional: the pair entry is A→B, not a balance.
+      const a = url.searchParams.get('a')
+      const b = url.searchParams.get('b')
+      if (a && b) {
+        const fwd = (await this.state.storage.get(`recip:${a}:${b}`)) as string | undefined
+        const rev = (await this.state.storage.get(`recip:${b}:${a}`)) as string | undefined
+        return this.json({ a, b, aToB: fwd ?? '0', bToA: rev ?? '0' })
+      }
+      const all = await this.state.storage.list({ prefix: 'recip:', limit: 500 })
+      return this.json({ balances: Object.fromEntries(all) })
+    }
     if (url.pathname === '/jobs' && req.method === 'POST') {
-      if (!this.bearerOk(req, this.env.DISPATCH_AUTH_TOKEN)) return this.json({ error: 'unauthorized' }, 401)
-      return this.handleDirectJob(req)
+      const auth = this.jobAuth(req)
+      if (!auth.ok) return this.json({ error: 'unauthorized' }, 401)
+      return this.handleDirectJob(req, auth.project)
+    }
+    if (url.pathname === '/jobs/batch' && req.method === 'POST') {
+      const auth = this.jobAuth(req)
+      if (!auth.ok) return this.json({ error: 'unauthorized' }, 401)
+      return this.handleBatchJob(req, auth.project)
+    }
+    if (url.pathname === '/v1/chat/completions' && req.method === 'POST') {
+      const auth = this.jobAuth(req)
+      if (!auth.ok) return this.json({ error: 'unauthorized' }, 401)
+      return this.handleChatCompletions(req, auth.project)
+    }
+    if (url.pathname === '/patronage' && req.method === 'POST') {
+      // Direct micro-donations → ledger credit + provisioned rep.
+      const auth = this.jobAuth(req)
+      if (!auth.ok) return this.json({ error: 'unauthorized' }, 401)
+      return this.handlePatronage(req, auth.project)
+    }
+    if (url.pathname === '/pools/unpause' && req.method === 'POST') {
+      if (!this.bearerOk(req, this.env.ADMIN_TOKEN)) return this.json({ error: 'unauthorized' }, 401)
+      const body = (await req.json().catch(() => ({}))) as { project?: string }
+      if (!body.project) return this.json({ error: 'project required' }, 400)
+      await this.state.storage.delete(`paused:project:${body.project}`)
+      await this.state.storage.delete(`spend:project:${body.project}`)
+      await this.audit('pool.unpaused', { project: body.project })
+      return this.json({ ok: true })
     }
     if (url.pathname === '/settle' && req.method === 'POST') {
       if (!this.bearerOk(req, this.env.ADMIN_TOKEN)) return this.json({ error: 'unauthorized' }, 401)
       return this.handleSettle(req)
     }
-    if (url.pathname.startsWith('/results/')) {
-      // Results can contain consumer data — admin only. Direct-job callers
-      // get their result inline in the POST /jobs response instead.
+    if (url.pathname === '/metrics') {
+      // Prometheus exposition — VictoriaMetrics/Prometheus scrape target
+      // (no Grafana dependency; AGPL rejected by the license bar anyway).
+      const lines = [
+        `# HELP chimera_volunteers Registered volunteers`,
+        `chimera_volunteers ${this.registry.size}`,
+        `chimera_idle ${[...this.registry.values()].filter((v) => v.status === 'idle').length}`,
+        `chimera_durable ${[...this.registry.values()].filter((v) => v.durable).length}`,
+        `chimera_pending_jobs ${(await this.keys('pending:')).length}`,
+      ]
+      for (const [tt, n] of Object.entries(this.countByTaskType()))
+        lines.push(`chimera_volunteers_by_task{taskType="${tt}"} ${n}`)
+      for (const [p, n] of Object.entries(this.countByProject()))
+        lines.push(`chimera_supporters{project="${p}"} ${n}`)
+      for (const p of await this.pausedProjects())
+        lines.push(`chimera_pool_paused{project="${p}"} 1`)
+      return new Response(lines.join('\n') + '\n', {
+        headers: { 'content-type': 'text/plain; version=0.0.4' },
+      })
+    }
+    if (url.pathname === '/.well-known/agent.json') {
+      // ERC-8004-style agent card — pool agents/services are discoverable
+      // here without a registry contract call.
+      const { account } = makeClients(this.env, this.rpcIdx)
+      return this.json({
+        name: 'chimera-coordinator',
+        version: 1,
+        operator: account?.address ?? null,
+        capabilities: {
+          jobs: ['/jobs', '/jobs/batch'],
+          openaiCompat: '/v1/chat/completions',
+          mcp: '/mcp',
+          payment: this.env.X402_PAYEE ? ['x402'] : [],
+        },
+        taskTypes: { canonical: [0, 1, 2, 3], wpcloud: [100, 101, 102, 103], project: [200, 201, 202, 203, 204, 205], swarmReserved: [300, 301] },
+        endpoints: { status: '/status', badge: '/badge/:project', leaderboard: '/leaderboard' },
+      })
+    }
+    if (url.pathname === '/passport' && url.searchParams.get('id')) {
+      // Signed rep attestation — a self-certifying passport the holder can
+      // present anywhere; ATProto PDS publication is a later transport.
+      const id = url.searchParams.get('id')!
+      const rep = (await this.state.storage.get(`rep:${id}`)) as
+        | { points: number; jobs: number; referrals: number } | undefined
+      const meta = this.registry.get(id)
+      const attestation = {
+        subject: id, did: meta?.did ?? null, project: meta?.project ?? null,
+        rep: rep ?? { points: 0, jobs: 0, referrals: 0 }, at: Date.now(),
+      }
+      const { account } = makeClients(this.env, this.rpcIdx)
+      let sig: string | null = null
+      if (account) {
+        try { sig = await account.signMessage({ message: `chimera-passport:${JSON.stringify(attestation)}` }) } catch {}
+      }
+      return this.json({ attestation, issuer: account?.address ?? null, sig })
+    }
+    if (url.pathname === '/mcp/tools' || url.pathname === '/mcp') {
+      // Minimal MCP-style tool catalog — a real MCP server transport can
+      // wrap these; swarm work is exposed as tools.
+      return this.json({ tools: [
+        { name: 'chimera_infer', description: 'Run an instruct-model job on the visitor pool', inputSchema: { type: 'object', properties: { prompt: { type: 'string' }, project: { type: 'string' } }, required: ['prompt'] } },
+        { name: 'chimera_fetch', description: 'Fetch a public URL via a visitor node (hash-verified)', inputSchema: { type: 'object', properties: { url: { type: 'string' } }, required: ['url'] } },
+      ]})
+    }
+    if (url.pathname === '/mcp/call' && req.method === 'POST') {
+      const auth = this.jobAuth(req)
+      if (!auth.ok) return this.json({ error: 'unauthorized' }, 401)
+      const body = (await req.json().catch(() => null)) as
+        | { name?: string; arguments?: Record<string, unknown> } | null
+      const a = body?.arguments ?? {}
+      const taskType = body?.name === 'chimera_fetch' ? 205 : 200
+      const payload = body?.name === 'chimera_fetch'
+        ? JSON.stringify({ url: String(a.url ?? '') })
+        : JSON.stringify({ prompt: String(a.prompt ?? '') })
+      const out = await this.prepareJob(
+        { payload, taskType, project: typeof a.project === 'string' ? a.project : auth.project, priority: 'interactive' },
+        auth.project,
+      )
+      if (out instanceof Response) return out
+      const accepted = await this.dispatch(out.jobId)
+      const stored = accepted ? await this.state.storage.get(`result:${out.jobId}`) : null
+      const text = (stored as { result?: string } | null)?.result ?? ''
+      return this.json({ content: [{ type: 'text', text }], isError: !accepted })
+    }
+    if (url.pathname === '/proxy/fetch' && req.method === 'POST') {
+      return this.handleProxyFetch(req)
+    }
+    if (url.pathname === '/committee/propose' && req.method === 'POST') {
       if (!this.bearerOk(req, this.env.ADMIN_TOKEN)) return this.json({ error: 'unauthorized' }, 401)
-      const r = await this.state.storage.get(`result:${url.pathname.slice(9)}`)
+      const body = (await req.json().catch(() => ({}))) as { motion?: string }
+      if (!body.motion) return this.json({ error: 'motion required' }, 400)
+      const id = crypto.randomUUID()
+      await this.state.storage.put(`committee:${id}`, {
+        motion: body.motion.slice(0, 500), at: Date.now(), yes: 0, no: 0, votes: {},
+      })
+      return this.json({ id })
+    }
+    if (url.pathname === '/committee/vote' && req.method === 'POST') {
+      // Rep-weighted decision log — groundwork for the federated committee:
+      // votes only count from rep-holding volunteerIds, one vote each.
+      const body = (await req.json().catch(() => ({}))) as { id?: string; voter?: string; approve?: boolean }
+      if (!body.id || !body.voter) return this.json({ error: 'id + voter required' }, 400)
+      const m = (await this.state.storage.get(`committee:${body.id}`)) as
+        | { yes: number; no: number; votes: Record<string, number>; motion: string; closed?: boolean } | undefined
+      if (!m || m.closed) return this.json({ error: 'motion not found/closed' }, 404)
+      if (m.votes[body.voter] !== undefined) return this.json({ error: 'already voted' }, 409)
+      const rep = (await this.state.storage.get(`rep:${body.voter}`)) as { points?: number } | undefined
+      const weight = rep?.points ?? 0
+      if (weight <= 0) return this.json({ error: 'voter holds no rep' }, 403)
+      m.votes[body.voter] = body.approve ? weight : -weight
+      if (body.approve) m.yes += weight; else m.no += weight
+      const quorum = Number(this.env.JURY_QUORUM || '3')
+      const totalRep = m.yes + m.no
+      if (totalRep >= quorum && m.yes > 2 * m.no) m.closed = true
+      await this.state.storage.put(`committee:${body.id}`, m)
+      await this.audit('committee.vote', { motion: body.id, voter: body.voter, weight, approve: !!body.approve })
+      return this.json({ ok: true, yes: m.yes, no: m.no, closed: !!m.closed })
+    }
+    if (url.pathname === '/.well-known/ens' && url.searchParams.get('name')) {
+      if (!this.env.ENS_RPC) return this.json({ error: 'ENS not configured' }, 501)
+      return this.handleEns(url.searchParams.get('name')!)
+    }
+    if (url.pathname.startsWith('/results/')) {
+      // Results are admin-gated, EXCEPT for holders of the job's resultToken
+      // — /jobs and /jobs/batch issue one per job so batch consumers can
+      // fetch their own results without admin access.
+      const jobId = url.pathname.slice(9)
+      const r = await this.state.storage.get(`result:${jobId}`) as
+        | { resultToken?: string } | undefined
+      const token = url.searchParams.get('token')
+      const tokenOk = token && r?.resultToken && token === r.resultToken
+      if (!tokenOk && !this.bearerOk(req, this.env.ADMIN_TOKEN)) {
+        return this.json({ error: 'unauthorized' }, 401)
+      }
+      if (r && r.resultToken) delete (r as Record<string, unknown>).resultToken
       return r ? this.json(r) : this.json({ error: 'not found' }, 404)
     }
     return this.json({ error: 'not found' }, 404)
@@ -176,6 +503,23 @@ export class CoordinatorDO implements DurableObject {
           ws.close(4009, 'id in use')
           return
         }
+        // DID binding — the node signs `chimera-bind:<volunteerId>` with its
+        // operator key; verified via EIP-191 recovery. DID-bound nodes get
+        // full payouts and rep events; anonymous nodes are payout-capped.
+        let did: string | undefined
+        if (typeof env.did === 'string' && typeof env.sig === 'string') {
+          try {
+            const ok = await verifyMessage({
+              address: env.did as Hex,
+              message: `chimera-bind:${id}`,
+              signature: env.sig as Hex,
+            })
+            if (ok) did = env.did
+            else console.warn(`[coordinator] ${id} presented invalid DID sig`)
+          } catch {
+            console.warn(`[coordinator] ${id} DID verify failed`)
+          }
+        }
         const meta: VolunteerMeta = {
           id,
           address: env.address || '',
@@ -183,9 +527,23 @@ export class CoordinatorDO implements DurableObject {
           capabilities: env.capabilities || {},
           networks: env.networks?.length ? env.networks : ['base'],
           site: typeof env.site === 'string' ? env.site.slice(0, 64) : undefined,
+          project: typeof env.project === 'string' ? env.project.slice(0, 64) : undefined,
+          referrer: typeof env.referrer === 'string' ? env.referrer.slice(0, 64) : undefined,
+          did,
+          durable: env.durable === true || undefined,
+          shardCapacity: typeof env.shardCapacity === 'number' ? Math.max(0, Math.round(env.shardCapacity)) : undefined,
           status: 'idle',
           registeredAt: Date.now(),
           lastHeartbeat: Date.now(),
+        }
+        // Referral attribution — record-only in P1 (rep accrual + self-
+        // referral caps land in P4/P5). First claim wins so a later
+        // REGISTER can't reattribute an existing node.
+        if (meta.referrer && meta.referrer !== meta.id) {
+          const rkey = `ref:${meta.id}`
+          if (!(await this.state.storage.get(rkey))) {
+            await this.state.storage.put(rkey, { referrer: meta.referrer, project: meta.project, at: Date.now() })
+          }
         }
         this.registry.set(meta.id, meta)
         ws.serializeAttachment(meta)
@@ -251,20 +609,73 @@ export class CoordinatorDO implements DurableObject {
     // Always reschedule first — a crash must not stall the pipeline.
     await this.state.storage.setAlarm(Date.now() + Number(this.env.POLL_INTERVAL_MS || '15000'))
     try {
+      await this.migrate()
       await this.pollChain()
       await this.flushPending()
+      await this.canaryTick()
     } catch (e) {
       console.error('[coordinator] alarm error:', e)
     }
   }
 
+  /** DO storage schema versioning — bump CURRENT and add a step when the
+   *  persistence layout changes. Runs once per wake via `migrated`. */
+  private static readonly SCHEMA_VERSION = 1
+  private async migrate() {
+    if (this.migrated) return
+    this.migrated = true
+    const v = (await this.state.storage.get<number>('schema:v')) ?? 0
+    if (v < CoordinatorDO.SCHEMA_VERSION) {
+      // v0→v1: no layout change yet — stamp only.
+      await this.state.storage.put('schema:v', CoordinatorDO.SCHEMA_VERSION)
+      await this.audit('schema.migrated', { from: v, to: CoordinatorDO.SCHEMA_VERSION })
+    }
+  }
+
+  /** Honesty canary — periodically dispatch a CANARY job (echo-the-nonce) to
+   *  a random volunteer. A node that returns anything but the nonce is
+   *  fabricating results; onJobResult applies the trust penalty. */
+  private async canaryTick() {
+    const interval = Number(this.env.CANARY_INTERVAL_MS || '1800000')
+    const last = (await this.state.storage.get<number>('canary:last')) ?? 0
+    if (Date.now() - last < interval) return
+    const idle = [...this.registry.values()].filter((v) => v.status === 'idle' && v.taskTypes.includes(PROJECT.CANARY))
+    if (!idle.length) return
+    await this.state.storage.put('canary:last', Date.now())
+    const nonce = crypto.randomUUID()
+    const jobId = `canary-${crypto.randomUUID()}`
+    await this.state.storage.put(`canary:${jobId}`, nonce)
+    await this.state.storage.put<PendingJob>(`pending:${jobId}`, {
+      taskType: PROJECT.CANARY,
+      payload: JSON.stringify({ nonce }),
+      amountWei: '0',
+      source: 'direct',
+      priority: 'batch',
+      since: Date.now(),
+    })
+    void this.dispatch(jobId)
+  }
+
   private async pollChain() {
     if (!this.env.COORDINATOR_PRIVATE_KEY) return
     if (this.env.ESCROW_CONTRACT === '0x0000000000000000000000000000000000000000') return
-    const { pub, contract } = makeClients(this.env)
+    const { pub, contract, url, urlCount } = makeClients(this.env, this.rpcIdx)
+
+    let head: bigint
+    try {
+      head = await pub.getBlockNumber()
+    } catch (e) {
+      // Transport failure — rotate to the next configured RPC. The next
+      // alarm tick resumes on the new endpoint at the same block cursor.
+      if (urlCount > 1) {
+        this.rpcIdx = (this.rpcIdx + 1) % urlCount
+        await this.audit('rpc.failover', { from: url, toIdx: this.rpcIdx })
+      }
+      console.error('[coordinator] RPC error:', e)
+      return
+    }
 
     const last = (await this.state.storage.get<bigint>('lastBlock')) ?? 0n
-    const head = await pub.getBlockNumber()
     if (last === 0n) {
       // First run: start at head — don't replay history.
       await this.state.storage.put('lastBlock', head)
@@ -282,14 +693,25 @@ export class CoordinatorDO implements DurableObject {
     // bound and eventually trips the RPC's log-range limit, stalling polling.
     await this.state.storage.put('lastBlock', head)
 
+    const sealed = parseSealed(this.env.SEALED_VALUES)
     for (const log of logs) {
       const jobId = log.args.jobId as Hex
       if (await this.state.storage.get(`handled:${jobId}`)) continue
       if (await this.state.storage.get(`pending:${jobId}`)) continue
-      const payload = String(log.args.payload ?? '')
+      let payload = String(log.args.payload ?? '')
       if (new TextEncoder().encode(payload).length > Number(this.env.MAX_PAYLOAD_BYTES || '8192')) {
         await this.state.storage.put(`handled:${jobId}`, 'oversize')
         continue
+      }
+      const lintHit = lintPayload(payload)
+      if (lintHit) {
+        await this.state.storage.put(`handled:${jobId}`, `lint:${lintHit}`)
+        continue
+      }
+      const red = redactPayload(payload, sealed)
+      if (red.redacted.length) {
+        payload = red.payload
+        await this.audit('job.redacted', { jobId, names: red.redacted })
       }
       await this.state.storage.put<PendingJob>(`pending:${jobId}`, {
         taskType: Number(log.args.taskType) || 0,
@@ -318,11 +740,14 @@ export class CoordinatorDO implements DurableObject {
       return false
     }
 
-    // Site-scoped jobs prefer the site's own visitors (job.site → v.site),
-    // spilling to the global pool when the site's traffic is idle/offline.
-    // No network filter: volunteers self-report upstream labels like
-    // 'botchain'; dispatch is jobId-keyed so the network tag is advisory.
-    const volunteer = selectVolunteer(this.registry.values(), job.taskType, [], Date.now(), job.site)
+    // Preference cascade: project-pooled volunteers → the job's own site
+    // visitors → global pool. No network filter: volunteers self-report
+    // upstream labels like 'botchain'; dispatch is jobId-keyed so the
+    // network tag is advisory.
+    const volunteer = selectVolunteer(
+      this.registry.values(), job.taskType, [], Date.now(),
+      job.site, job.project, job.difficulty,
+    )
     if (!volunteer) return false
 
     const ws = this.wsFor(volunteer.id)
@@ -331,6 +756,14 @@ export class CoordinatorDO implements DurableObject {
     volunteer.status = 'busy'
     ws.serializeAttachment(volunteer)
     await this.state.storage.put(`assigned:${jobId}`, { volunteerId: volunteer.id, at: Date.now() })
+    // Signed dispatch — nodes can verify job provenance against the
+    // coordinator address exposed at /status. Unsigned when no key is set
+    // (dev mode); verification is opt-in node-side.
+    const { account } = makeClients(this.env, this.rpcIdx)
+    let sig: string | undefined
+    if (account) {
+      try { sig = await signDispatch(account, jobId) } catch { /* non-fatal */ }
+    }
     ws.send(JSON.stringify({
       type: 'JOB_DISPATCH',
       jobId,
@@ -338,7 +771,15 @@ export class CoordinatorDO implements DurableObject {
       taskType: job.taskType,
       requestHash: job.payload,
       amount: job.amountWei,
+      ...(job.project ? { project: job.project } : {}),
+      ...(job.difficulty !== undefined ? { difficulty: job.difficulty } : {}),
+      ...(job.domain ? { domain: job.domain } : {}),
+      ...(job.modelClass ? { modelClass: job.modelClass } : {}),
+      ...(job.priority ? { priority: job.priority } : {}),
+      ...(job.group ? { group: job.group } : {}),
+      ...(sig ? { sig } : {}),
     }))
+    void this.audit('job.dispatch', { jobId, volunteerId: volunteer.id, taskType: job.taskType })
 
     const timeoutMs = Number(this.env.JOB_RESULT_TIMEOUT_MS || '60000')
     return new Promise<boolean>((resolve) => {
@@ -370,11 +811,63 @@ export class CoordinatorDO implements DurableObject {
     // anyone could claim credit for a jobId they saw on-chain or in transit.
     if (!assignment || assignment.volunteerId !== volunteerId) return
 
+    // Result dedup — a replayed JOB_RESULT for an already-stored job is a
+    // no-op (idempotent), not a second credit.
+    if (await this.state.storage.get(`result:${jobId}`)) {
+      const pending = this.awaiting.get(jobId)
+      if (pending) { this.awaiting.delete(jobId); pending.resolve(true) }
+      return
+    }
+
     const job = await this.state.storage.get<PendingJob>(`pending:${jobId}`)
     if (!job) {
       await this.releaseAssignment(jobId)
       const pending = this.awaiting.get(jobId)
       if (pending) { this.awaiting.delete(jobId); pending.resolve(true) }
+      return
+    }
+
+    // Schema-gate typed results before credit or chain completion — a
+    // malformed result is stored (for audit) but earns nothing and is not
+    // retried (handled flag stops the redispatch loop).
+    if (!validateJobResult(job.taskType, result)) {
+      await this.state.storage.delete(`pending:${jobId}`)
+      await this.state.storage.delete(`assigned:${jobId}`)
+      await this.state.storage.put(`handled:${jobId}`, 'invalid-result')
+      await this.state.storage.put(`result:${jobId}`, {
+        volunteerId, result, at: Date.now(), source: job.source, invalid: true,
+      })
+      const v0 = this.registry.get(volunteerId)
+      if (v0) { v0.status = 'idle'; this.wsFor(v0.id)?.serializeAttachment(v0) }
+      const pending = this.awaiting.get(jobId)
+      if (pending) { this.awaiting.delete(jobId); pending.resolve(true) }
+      return
+    }
+
+    // Honesty canary — CANARY jobs carry a coordinator-generated nonce the
+    // node must echo verbatim. Anything else = fabricated result → trust
+    // penalty slides the node down the dispatch order. Never credited,
+    // never retried. (A timed-out canary is just an offline node — no
+    // penalty; only a wrong answer trips it.)
+    const canaryNonce = await this.state.storage.get<string>(`canary:${jobId}`)
+    if (canaryNonce !== undefined) {
+      const passed = result === canaryNonce
+      await this.state.storage.delete(`pending:${jobId}`)
+      await this.state.storage.delete(`assigned:${jobId}`)
+      await this.state.storage.delete(`canary:${jobId}`)
+      await this.state.storage.put(`handled:${jobId}`, passed ? 1 : 'canary-fail')
+      await this.state.storage.put(`result:${jobId}`, {
+        volunteerId, result, at: Date.now(), source: job.source, canary: true, passed,
+      })
+      const v0 = this.registry.get(volunteerId)
+      if (v0) {
+        v0.status = 'idle'
+        if (!passed) v0.trust = (v0.trust ?? 0) - 5
+        this.wsFor(v0.id)?.serializeAttachment(v0)
+      }
+      await this.audit(passed ? 'canary.pass' : 'canary.fail', { jobId, volunteerId })
+      const pending = this.awaiting.get(jobId)
+      if (pending) { this.awaiting.delete(jobId); pending.resolve(passed) }
       return
     }
 
@@ -407,15 +900,98 @@ export class CoordinatorDO implements DurableObject {
     await this.state.storage.delete(`pending:${jobId}`)
     await this.state.storage.delete(`assigned:${jobId}`)
     await this.state.storage.put(`handled:${jobId}`, 1)
+    // Result records are data, not instructions — consumers must treat them
+    // as quoted, untrusted content (result-sandboxing contract). `estWh` is
+    // a rough watt-hour estimate: wall-clock × assumed node draw.
+    const assignmentAt = assignment.at ?? Date.now()
+    const durMs = Math.max(0, Date.now() - assignmentAt)
+    const cores = Number(this.registry.get(volunteerId)?.capabilities?.cpuCores ?? 2)
+    const estWh = Number((((cores * 4 + 5) * durMs) / 3_600_000).toFixed(4))
     await this.state.storage.put(`result:${jobId}`, {
       volunteerId, result, at: Date.now(), source: job.source,
+      sandbox: 'quoted', estWh, group: job.group, resultToken: job.resultToken,
     })
-    await this.credit(volunteerId, job.amountWei, job.site, this.registry.get(volunteerId)?.site === job.site)
+
+    // Spot-check adjudication — a replica job (verifyOf set) is compared to
+    // the original result. Only meaningful for deterministic jobs (pin CIDs);
+    // a mismatch can't identify the liar with one replica, so both sides get
+    // flagged for the jury rather than punished.
+    if (job.verifyOf) {
+      const orig = await this.state.storage.get(`result:${job.verifyOf}`) as
+        | { volunteerId?: string; result?: string } | undefined
+      const match = orig?.result === result
+      await this.audit(match ? 'verify.match' : 'verify.mismatch', {
+        jobId, original: job.verifyOf, replicaBy: volunteerId,
+      })
+      if (!match) {
+        await this.state.storage.put(`dispute:${job.verifyOf}`, {
+          original: job.verifyOf, replica: jobId,
+          volunteers: [orig?.volunteerId, volunteerId], at: Date.now(),
+        })
+      }
+    } else if (job.taskType === CANONICAL.STORAGE && this.env.VERIFY_RATE_PCT) {
+      // Verifier hook — with probability VERIFY_RATE_PCT re-run the pin on a
+      // second node and compare CIDs. Groundwork for opML/zkVM proofs: same
+      // replay slot, different check.
+      const rate = Math.min(Math.max(Number(this.env.VERIFY_RATE_PCT), 0), 100)
+      if (Math.random() * 100 < rate) {
+        void this.prepareJob({
+          taskType: job.taskType, payload: job.payload, amountWei: job.amountWei,
+          site: job.site, project: job.project, domain: job.domain,
+          verifyOf: jobId,
+        }, undefined)
+          .then((out) => { if (!(out instanceof Response)) void this.dispatch(out.jobId) })
+      }
+    }
+    await this.credit(
+      volunteerId, job.amountWei, job.site,
+      this.registry.get(volunteerId)?.site === job.site,
+      job.project,
+      this.registry.get(volunteerId)?.project === job.project,
+      job.domain,
+    )
+    // Jury adjudication — redundant siblings accumulate under group:<id>;
+    // once a quorum of results lands, majority-result jurors gain rep and
+    // dissenters lose it (rep-staked validation lite).
+    if (job.group) await this.tallyGroup(job.group, jobId, volunteerId, result)
     const v = this.registry.get(volunteerId)
     if (v) { v.status = 'idle'; this.wsFor(v.id)?.serializeAttachment(v) }
     // Resolve last — POST /jobs reads result:<jobId> once dispatch resolves.
     const pending = this.awaiting.get(jobId)
     if (pending) { this.awaiting.delete(jobId); pending.resolve(true) }
+  }
+
+  /** Tally a redundant-dispatch group. Majority = most common exact result
+   *  among siblings. Jurors in the majority earn +1 rep; dissenters -2.
+   *  Recorded under group:<id>.verdict for consumers to read. */
+  private async tallyGroup(group: string, jobId: string, volunteerId: string, result: string) {
+    const gkey = `group:${group}`
+    const g = ((await this.state.storage.get(gkey)) as
+      | { results: Record<string, { volunteerId: string; result: string }>; verdict?: string }
+      | undefined) ?? { results: {} }
+    if (g.verdict) return // already adjudicated — late sibling is informational
+    g.results[jobId] = { volunteerId, result }
+    const quorum = Number(this.env.JURY_QUORUM || '3')
+    if (Object.keys(g.results).length < quorum) {
+      await this.state.storage.put(gkey, g)
+      return
+    }
+    const counts = new Map<string, number>()
+    for (const r of Object.values(g.results)) counts.set(r.result, (counts.get(r.result) ?? 0) + 1)
+    const majority = [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0]
+    for (const r of Object.values(g.results)) {
+      await this.addRep(r.volunteerId, r.result === majority ? 1 : -2, 'jury')
+    }
+    g.verdict = majority
+    await this.state.storage.put(gkey, g)
+    await this.audit('jury.verdict', { group, majority: majority.slice(0, 120), jurors: Object.keys(g.results).length })
+    // Eval-corpus accrual — verdicts become benchmark data for the eval
+    // harness (P7) to gate policy/prompt versions against.
+    const corpusSeq = Number(await this.state.storage.get('corpus:seq') ?? 0) + 1
+    await this.state.storage.put('corpus:seq', corpusSeq)
+    await this.state.storage.put(`corpus:${corpusSeq}`, {
+      group, verdict: majority.slice(0, 500), jurors: Object.keys(g.results).length, at: Date.now(),
+    })
   }
 
   private async onJobRejected(jobId: string, volunteerId: string, reason?: string) {
@@ -436,8 +1012,28 @@ export class CoordinatorDO implements DurableObject {
    *  hibernate/wake where the in-memory timer was lost). */
   private async flushPending() {
     const timeoutMs = Number(this.env.JOB_RESULT_TIMEOUT_MS || '60000')
-    for (const key of await this.keys('pending:')) {
-      const jobId = key.slice(8)
+    // Interactive-first ordering: read each pending job once so interactive
+    // jobs jump the queue ahead of batch backlog. One extra storage get per
+    // key — acceptable at pending-job scale.
+    const pending = await Promise.all(
+      (await this.keys('pending:')).map(async (key) => ({
+        jobId: key.slice(8),
+        job: await this.state.storage.get<PendingJob>(key),
+      })),
+    )
+    pending.sort((a, b) =>
+      (a.job?.priority === 'interactive' ? 0 : 1) - (b.job?.priority === 'interactive' ? 0 : 1))
+    // Pending TTL — a job no volunteer can serve would otherwise sit in
+    // storage forever. Expire unassigned old jobs as 'no-capacity'.
+    const ttlMs = Number(this.env.PENDING_TTL_MS || '3600000')
+    for (const { jobId, job } of pending) {
+      if (!job || Date.now() - job.since <= ttlMs) continue
+      if (await this.state.storage.get(`assigned:${jobId}`)) continue
+      await this.state.storage.delete(`pending:${jobId}`)
+      await this.state.storage.put(`handled:${jobId}`, 'no-capacity')
+      await this.audit('job.expired', { jobId, taskType: job.taskType })
+    }
+    for (const { jobId } of pending) {
       const a = (await this.state.storage.get(`assigned:${jobId}`)) as
         | { volunteerId: string; at: number }
         | undefined
@@ -456,34 +1052,397 @@ export class CoordinatorDO implements DurableObject {
 
   // ── Direct job injection + settlement endpoints ──
 
-  private async handleDirectJob(req: Request): Promise<Response> {
-    const body = (await req.json().catch(() => null)) as
-      | { payload?: string; taskType?: number; amountWei?: string; site?: string }
-      | null
+  /** Direct-job auth: the global DISPATCH_AUTH_TOKEN accepts anything;
+   *  a PROJECT_TOKENS project token restricts submissions to that slug. */
+  private jobAuth(req: Request): { ok: boolean; project?: string } {
+    if (this.bearerOk(req, this.env.DISPATCH_AUTH_TOKEN)) return { ok: true }
+    if (this.env.PROJECT_TOKENS) {
+      const token = (req.headers.get('authorization') || '').replace(/^Bearer\s+/i, '')
+      try {
+        const tokens = JSON.parse(this.env.PROJECT_TOKENS) as Record<string, string>
+        for (const [slug, t] of Object.entries(tokens)) {
+          if (t && token && t === token) return { ok: true, project: slug }
+        }
+      } catch {
+        /* malformed PROJECT_TOKENS — global auth already failed, deny */
+      }
+    }
+    return { ok: false }
+  }
+
+  /** Validate + persist one direct job. Returns jobId or an error Response. */
+  private async prepareJob(body: DirectJobBody, authProject?: string): Promise<{ jobId: string; resultToken: string } | Response> {
+    const project = typeof body.project === 'string' ? body.project.slice(0, 64) : undefined
+    if (authProject && project !== authProject) {
+      return this.json({ error: `project token may only submit jobs for "${authProject}"` }, 403)
+    }
     if (!body?.payload) return this.json({ error: 'payload required' }, 400)
     const maxBytes = Number(this.env.MAX_PAYLOAD_BYTES || '8192')
     if (new TextEncoder().encode(body.payload).length > maxBytes) {
       return this.json({ error: `payload exceeds ${maxBytes} bytes` }, 413)
     }
+    if (!classificationOk(body.classification)) {
+      return this.json({ error: 'only PUBLIC classification is accepted' }, 400)
+    }
+    // Circuit breaker — a project whose spend breached its PROJECT_BUDGETS
+    // cap refuses new work until /pools/unpause (admin) resets it.
+    if (project && (await this.state.storage.get(`paused:project:${project}`))) {
+      return this.json({ error: `project "${project}" is paused (budget breach)` }, 503)
+    }
+    const lintHit = lintPayload(body.payload)
+    if (lintHit) {
+      return this.json({ error: `payload rejected by lint: ${lintHit}` }, 400)
+    }
+    // Per-identity daily quota — keyed on the project token slug (or
+    // 'global' for the master token). Best-effort anti-abuse: a misbehaving
+    // submitter can still spread across slugs, which is why the real brake
+    // is per-pool PROJECT_BUDGETS.
+    const quota = Number(this.env.AGENT_DAILY_QUOTA || '0')
+    if (quota > 0) {
+      const day = new Date().toISOString().slice(0, 10)
+      const qkey = `quota:${day}:${authProject ?? 'global'}`
+      const used = Number(await this.state.storage.get(qkey) ?? 0)
+      if (used >= quota) return this.json({ error: 'daily quota exceeded' }, 429)
+      await this.state.storage.put(qkey, used + 1)
+    }
+    // PoW gate (opt-in via POW_DIFFICULTY>0) — hashcash-style: sha256(
+    // payload:nonce) must carry N leading zero hex digits. A cheap brake on
+    // automated /jobs spam that costs the submitter real CPU, not us.
+    const powDiff = Number(this.env.POW_DIFFICULTY || '0')
+    if (powDiff > 0) {
+      const nonce = (body as Record<string, unknown>).pow
+      if (typeof nonce !== 'string' || nonce.length > 64) {
+        return this.json({ error: 'pow nonce required', difficulty: powDiff }, 403)
+      }
+      const h = await this.sha256Hex(`${body.payload}:${nonce}`)
+      if (!h.startsWith('0'.repeat(powDiff))) {
+        return this.json({ error: 'insufficient pow', difficulty: powDiff }, 403)
+      }
+    }
+    // Redaction gate — sealed values are replaced with [SEALED:name] before
+    // storage, so they provably never reach a node.
+    const sealed = parseSealed(this.env.SEALED_VALUES)
+    let payload = body.payload
+    const red = redactPayload(payload, sealed)
+    if (red.redacted.length) {
+      payload = red.payload
+      void this.audit('job.redacted', { names: red.redacted, project })
+    }
+    // Price-table default — callers that omit amountWei get the lane's
+    // configured price (micro-USDC); absent table = zero-price job.
+    // LANE_PREMIUMS scales the lane price for tagged domains.
+    let amountWei = body.amountWei
+    if (!amountWei && this.env.PRICE_TABLE) {
+      try {
+        const table = JSON.parse(this.env.PRICE_TABLE) as Record<string, string>
+        let price = BigInt(table[String(Number(body.taskType) || 0)] ?? '0')
+        if (price > 0n && body.domain && this.env.LANE_PREMIUMS) {
+          const prem = (JSON.parse(this.env.LANE_PREMIUMS) as Record<string, number>)[body.domain]
+          if (prem) price = (price * BigInt(Math.round(prem))) / 100n
+        }
+        if (price > 0n) amountWei = price.toString()
+      } catch { /* malformed PRICE_TABLE — zero-price */ }
+    }
     const jobId = `direct-${crypto.randomUUID()}`
+    const resultToken = crypto.randomUUID()
     await this.state.storage.put<PendingJob>(`pending:${jobId}`, {
       taskType: Number(body.taskType) || 0,
-      payload: body.payload,
-      amountWei: body.amountWei || '0',
+      payload,
+      amountWei: amountWei || '0',
       source: 'direct',
       site: typeof body.site === 'string' ? body.site.slice(0, 64) : undefined,
+      project,
+      classification: 'PUBLIC',
+      difficulty: typeof body.difficulty === 'number' ? Math.min(Math.max(Math.round(body.difficulty), 0), 3) : undefined,
+      domain: typeof body.domain === 'string' ? body.domain.slice(0, 32) : undefined,
+      modelClass: typeof body.modelClass === 'string' ? body.modelClass.slice(0, 32) : undefined,
+      priority: body.priority === 'interactive' ? 'interactive' : 'batch',
+      group: typeof body.group === 'string' ? body.group.slice(0, 64) : undefined,
+      resultToken,
+      verifyOf: typeof body.verifyOf === 'string' ? body.verifyOf.slice(0, 64) : undefined,
       since: Date.now(),
     })
-    const accepted = await this.dispatch(jobId)
-    const result = accepted
-      ? await this.state.storage.get(`result:${jobId}`)
-      : null
-    return this.json({ jobId, accepted, result })
+    void this.audit('job.submit', { jobId, project, taskType: Number(body.taskType) || 0, amountWei: amountWei || '0' })
+    return { jobId, resultToken }
   }
 
-  /** Marks ledger balances settled — used by the monthly Logos payout runbook. */
+  private async handleDirectJob(req: Request, authProject?: string): Promise<Response> {
+    const body = (await req.json().catch(() => null)) as DirectJobBody | null
+    // x402 — when a payee is configured and the caller didn't supply
+    // amountWei, priced submissions carry an X-PAYMENT (EIP-3009
+    // TransferWithAuthorization). We verify the signature and record the
+    // intent; broadcast/settlement stays with the facilitator/ops path.
+    const paidWei = await this.checkPayment(req, body)
+    if (paidWei instanceof Response) return paidWei
+    const jobBody: DirectJobBody = body ?? {}
+    if (paidWei) jobBody.amountWei = paidWei
+    const redundant = Math.min(Math.max(Math.round(jobBody.redundant ?? 1), 1), 5)
+    if (redundant > 1) {
+      // Jury-redundant dispatch — N sibling jobs in one group; onJobResult
+      // tallies them (tallyGroup) once a quorum lands.
+      const group = crypto.randomUUID()
+      const jobs: Array<{ jobId: string; resultToken: string } | { error: string }> = []
+      for (let i = 0; i < redundant; i++) {
+        const out = await this.prepareJob({ ...jobBody, group }, authProject)
+        jobs.push(out instanceof Response ? { error: (await out.json() as { error: string }).error } : out)
+      }
+      for (const j of jobs) if ('jobId' in j) void this.dispatch(j.jobId)
+      return this.json({ jobIds: jobs.map((j) => 'jobId' in j ? j.jobId : j), jobs, group })
+    }
+    const out = await this.prepareJob(jobBody, authProject)
+    if (out instanceof Response) return out
+    const accepted = await this.dispatch(out.jobId)
+    const result = accepted
+      ? await this.state.storage.get(`result:${out.jobId}`)
+      : null
+    return this.json({ jobId: out.jobId, resultToken: out.resultToken, accepted, result })
+  }
+
+  /** /jobs/batch — up to 50 jobs per call. Per-item failures don't fail the
+   *  batch; results map index → jobId | error. Unlike /jobs, dispatch is
+   *  fire-and-forget (a batch holding 50 result promises would blow the
+   *  request budget). */
+  private async handleBatchJob(req: Request, authProject?: string): Promise<Response> {
+    const body = (await req.json().catch(() => null)) as { jobs?: DirectJobBody[] } | null
+    if (!Array.isArray(body?.jobs) || !body.jobs.length || body.jobs.length > 50) {
+      return this.json({ error: 'jobs must be a non-empty array of at most 50' }, 400)
+    }
+    const results: Array<{ jobId?: string; error?: string }> = []
+    for (const item of body.jobs) {
+      const out = await this.prepareJob(item, authProject)
+      if (out instanceof Response) {
+        results.push({ error: (await out.json() as { error: string }).error })
+      } else {
+        void this.dispatch(out.jobId)
+        results.push(out)
+      }
+    }
+    return this.json({ results })
+  }
+
+  /** OpenAI-compatible shim — /v1/chat/completions → AGENT_INFER pool job →
+   *  OpenAI-shaped response. Makes the swarm a drop-in backend for any
+   *  agent framework that speaks chat-completions (ElizaOS, LangChain, …).
+   *  Auth = the same dispatch tokens as /jobs (a project token pins the job
+   *  to that pool). Streaming is not supported yet — `stream:true` requests
+   *  get a normal non-streamed body. */
+  private async handleChatCompletions(req: Request, authProject?: string): Promise<Response> {
+    const body = (await req.json().catch(() => null)) as
+      | { model?: string; messages?: { role?: string; content?: string }[]; max_tokens?: number; project?: string; stream?: boolean }
+      | null
+    if (!body?.messages?.length) {
+      return this.json({ error: { message: 'messages required', type: 'invalid_request_error' } }, 400)
+    }
+    // Flatten the chat into a single prompt — pool nodes run instruct models.
+    const prompt = body.messages
+      .map((m) => `${(m.role || 'user').toUpperCase()}: ${m.content ?? ''}`)
+      .join('\n')
+    const out = await this.prepareJob(
+      {
+        payload: JSON.stringify({ prompt }),
+        taskType: PROJECT.AGENT_INFER,
+        project: body.project,
+        classification: 'PUBLIC',
+        priority: 'interactive',
+      },
+      authProject,
+    )
+    if (out instanceof Response) return out
+    const accepted = await this.dispatch(out.jobId)
+    const stored = accepted ? await this.state.storage.get(`result:${out.jobId}`) : null
+    const text = stored && typeof (stored as { result?: unknown }).result === 'string'
+      ? (stored as { result: string }).result
+      : null
+    if (!accepted || text === null) {
+      // Pool empty / timed out — 503 so callers fall back (e.g. Workers AI floor).
+      return this.json(
+        { error: { message: 'no volunteer capacity — try again or use a fallback provider', type: 'server_error' } },
+        503,
+      )
+    }
+    if (body.stream) {
+      // stream:true client-compat — nodes return whole results, so we replay
+      // the completed text as SSE deltas (not real token streaming; keeps
+      // OpenAI clients functional against the pool).
+      const enc = new TextEncoder()
+      const model = body.model || 'swarm'
+      const id = `chatcmpl-${out.jobId}`
+      const created = Math.floor(Date.now() / 1000)
+      const chunks: string[] = []
+      for (let i = 0; i < text.length; i += 128) chunks.push(text.slice(i, i + 128))
+      const stream = new ReadableStream({
+        start(controller) {
+          for (const c of chunks) {
+            controller.enqueue(enc.encode(`data: ${JSON.stringify({
+              id, object: 'chat.completion.chunk', created, model,
+              choices: [{ index: 0, delta: { content: c }, finish_reason: null }],
+            })}\n\n`))
+          }
+          controller.enqueue(enc.encode(`data: ${JSON.stringify({
+            id, object: 'chat.completion.chunk', created, model,
+            choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
+          })}\n\n`))
+          controller.enqueue(enc.encode('data: [DONE]\n\n'))
+          controller.close()
+        },
+      })
+      return new Response(stream, { headers: { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' } })
+    }
+    return this.json({
+      id: `chatcmpl-${out.jobId}`,
+      object: 'chat.completion',
+      created: Math.floor(Date.now() / 1000),
+      model: body.model || 'swarm',
+      choices: [
+        {
+          index: 0,
+          message: { role: 'assistant', content: text },
+          finish_reason: 'stop',
+        },
+      ],
+      // Token counts are unknowable without the node's tokenizer — report
+      // character-based estimates and mark them as such.
+      usage: { prompt_tokens: Math.ceil(prompt.length / 4), completion_tokens: Math.ceil(text.length / 4), total_tokens: 0 },
+    })
+  }
+
+  /** x402 payment gate — challenge when a payee is configured and the caller
+   *  brought no amountWei. Verified EIP-3009 intent returns the paid value
+   *  (used as the job's amountWei); null = no gate; Response = 402/error. */
+  private async checkPayment(req: Request, body: DirectJobBody | null): Promise<string | Response | null> {
+    const payee = this.env.X402_PAYEE
+    if (!payee || body?.amountWei) return null
+    const xpay = req.headers.get('x-payment')
+    if (!xpay) {
+      return this.json({
+        accepts: [{
+          scheme: 'exact', network: 'base', asset: this.env.X402_USDC || USDC_BASE,
+          payee, description: 'chimera compute job',
+        }],
+      }, 402)
+    }
+    const value = await this.verifyX402(xpay, payee)
+    if (!value) return this.json({ error: 'invalid x-payment' }, 400)
+    await this.audit('x402.payment', { payee, value })
+    return value
+  }
+
+  /** Verify an x402 'exact' payment: base64 JSON carrying an EIP-3009
+   *  TransferWithAuthorization signature over Base USDC. Signature validity
+   *  only — settlement/broadcast is a facilitator concern, not ours. */
+  private async verifyX402(xpay: string, payee: string): Promise<string | null> {
+    try {
+      const p = JSON.parse(atob(xpay)) as {
+        payload?: { signature?: string; authorization?: {
+          from: string; to: string; value: string; validAfter: string; validBefore: string; nonce: string } }
+      }
+      const auth = p.payload?.authorization
+      const sig = p.payload?.signature
+      if (!auth || !sig) return null
+      if (auth.to.toLowerCase() !== payee.toLowerCase()) return null
+      const now = BigInt(Math.floor(Date.now() / 1000))
+      if (now < BigInt(auth.validAfter) || now > BigInt(auth.validBefore)) return null
+      const ok = await verifyTypedData({
+        address: auth.from as Hex,
+        domain: {
+          name: 'USD Coin', version: '2', chainId: 8453,
+          verifyingContract: (this.env.X402_USDC || USDC_BASE) as Hex,
+        },
+        types: {
+          TransferWithAuthorization: [
+            { name: 'from', type: 'address' }, { name: 'to', type: 'address' },
+            { name: 'value', type: 'uint256' }, { name: 'validAfter', type: 'uint256' },
+            { name: 'validBefore', type: 'uint256' }, { name: 'nonce', type: 'bytes32' },
+          ],
+        },
+        primaryType: 'TransferWithAuthorization',
+        message: {
+          from: auth.from as Hex, to: auth.to as Hex, value: BigInt(auth.value),
+          validAfter: BigInt(auth.validAfter), validBefore: BigInt(auth.validBefore),
+          nonce: auth.nonce as Hex,
+        },
+        signature: sig as Hex,
+      })
+      return ok ? auth.value : null
+    } catch {
+      return null
+    }
+  }
+
+  /** Secrets-broker outbound injection — a node running a WEB_FETCH job that
+   *  declares `inject` headers calls here instead of fetching directly. The
+   *  coordinator attaches the sealed values to outbound request headers, so
+   *  secrets authenticate the upstream call without ever appearing in the
+   *  payload or on the node. The job's own (linted) payload defines url +
+   *  inject — the node can only trigger it, not retarget it. */
+  private async handleProxyFetch(req: Request): Promise<Response> {
+    const body = (await req.json().catch(() => null)) as
+      | { jobId?: string; volunteerId?: string } | null
+    if (!body?.jobId || !body.volunteerId) return this.json({ error: 'jobId + volunteerId required' }, 400)
+    const a = (await this.state.storage.get(`assigned:${body.jobId}`)) as
+      | { volunteerId: string } | undefined
+    if (!a || a.volunteerId !== body.volunteerId) return this.json({ error: 'not assigned' }, 403)
+    const job = await this.state.storage.get<PendingJob>(`pending:${body.jobId}`)
+    if (!job || job.taskType !== PROJECT.WEB_FETCH) return this.json({ error: 'not a fetch job' }, 400)
+    // Per-node rate limit — 30 proxied calls/minute.
+    const rk = `proxyRate:${body.volunteerId}:${Math.floor(Date.now() / 60_000)}`
+    const hits = Number(await this.state.storage.get(rk) ?? 0)
+    if (hits >= 30) return this.json({ error: 'proxy rate limited' }, 429)
+    await this.state.storage.put(rk, hits + 1)
+    try {
+      const spec = JSON.parse(job.payload) as { url?: string; inject?: Record<string, string>; headers?: Record<string, string> }
+      const u = new URL(String(spec.url ?? ''))
+      if (u.protocol !== 'https:') return this.json({ error: 'https-only' }, 400)
+      const headers: Record<string, string> = { ...(spec.headers ?? {}) }
+      const sealed = parseSealed(this.env.SEALED_VALUES)
+      const injected: string[] = []
+      for (const [header, sealName] of Object.entries(spec.inject ?? {})) {
+        if (sealed[sealName]) { headers[header] = sealed[sealName]; injected.push(sealName) }
+      }
+      const res = await fetch(u, { headers, signal: AbortSignal.timeout(15_000) })
+      const buf = await res.arrayBuffer()
+      if (buf.byteLength > 1_048_576) return this.json({ error: 'body >1MB' }, 502)
+      const hash = await this.sha256HexBuf(buf)
+      await this.audit('proxy.fetch', { jobId: body.jobId, volunteerId: body.volunteerId, url: u.host + u.pathname, injected, status: res.status })
+      const text = new TextDecoder().decode(buf)
+      return this.json({ status: res.status, bodyHash: hash, bytes: buf.byteLength, body: text.slice(0, 262_144) })
+    } catch (e) {
+      return this.json({ error: `upstream fetch failed: ${String(e).slice(0, 120)}` }, 502)
+    }
+  }
+
+  /** Pending-job TTL — an undispatchable job (no volunteer claims its
+   *  taskType) expires instead of sitting forever (default 1h). */
+  PENDING_TTL_MS?: string
+  /** % of hash-verifiable results (fetch/pin) re-dispatched to a second node
+   *  for spot-checking — verifier-hook groundwork (default 0 = off). */
+  VERIFY_RATE_PCT?: string
+  /** Referral landing target for /r/<volunteerId> redirects. */
+  REFERRAL_TARGET?: string
+  /** ENS content-hash resolution — `/.well-known/ens?name=x.eth` returns the
+   *  address + contenthash so swarm-pinned project sites can be discovered
+   *  through ENS naming. Requires ENS_RPC (mainnet). */
+  private async handleEns(name: string): Promise<Response> {
+    try {
+      const { createPublicClient, http } = await import('viem')
+      const { mainnet } = await import('viem/chains')
+      const pub = createPublicClient({ chain: mainnet, transport: http(this.env.ENS_RPC) })
+      const [address, url] = await Promise.all([
+        pub.getEnsAddress({ name: name as never }).catch(() => null),
+        pub.getEnsText({ name: name as never, key: 'url' }).catch(() => null),
+      ])
+      return this.json({ name, address, url })
+    } catch (e) {
+      return this.json({ error: `ens lookup failed: ${String(e).slice(0, 120)}` }, 502)
+    }
+  }
+
+  /** Marks ledger balances settled — used by the monthly Logos payout
+   *  runbook. Balances under MIN_PAYOUT_WEI convert to rep points instead
+   *  of a payout (dust→rep: sub-dust balances aren't worth gas/admin). */
   private async handleSettle(req: Request): Promise<Response> {
     const body = (await req.json().catch(() => ({}))) as { ids?: string[] }
+    const dust = BigInt(this.env.MIN_PAYOUT_WEI || '0')
     const out: Record<string, unknown> = {}
     for (const key of await this.keys('ledger:')) {
       const id = key.slice(7)
@@ -493,24 +1452,148 @@ export class CoordinatorDO implements DurableObject {
         | undefined
       if (!led) continue
       const unpaid = BigInt(led.totalWei) - BigInt(led.settledWei || '0')
+      if (dust > 0n && unpaid > 0n && unpaid < dust) {
+        // Dust → rep: mark settled, convert to rep points (1 point per micro-USDC).
+        led.settledWei = led.totalWei
+        await this.state.storage.put(key, led)
+        await this.addRep(id, Math.max(1, Math.floor(Number(unpaid / 1_000_000n))), 'dust-conversion')
+        out[id] = { settledWei: '0', dustToRep: unpaid.toString() }
+        continue
+      }
       led.settledWei = led.totalWei
       await this.state.storage.put(key, led)
       out[id] = { settledWei: unpaid.toString() }
     }
+    await this.audit('settle', { ledgers: Object.keys(out).length })
     return this.json({ settled: out })
   }
 
-  private async credit(volunteerId: string, amountWei: string, site?: string, ownVisitor = false) {
+  /** Direct micro-donations → provisioned rep + ledger credit. A patronage
+   *  can target a volunteerId (tip) or a project slug (pool funding). */
+  private async handlePatronage(req: Request, authProject?: string): Promise<Response> {
+    const body = (await req.json().catch(() => null)) as
+      | { volunteerId?: string; project?: string; amountWei?: string; note?: string }
+      | null
+    if (!body?.amountWei || !/^\d+$/.test(body.amountWei)) {
+      return this.json({ error: 'amountWei (integer wei) required' }, 400)
+    }
+    if (!body.volunteerId && !body.project) {
+      return this.json({ error: 'volunteerId or project required' }, 400)
+    }
+    if (authProject && body.project && body.project !== authProject) {
+      return this.json({ error: `project token may only fund "${authProject}"` }, 403)
+    }
+    const amount = BigInt(body.amountWei)
+    if (body.volunteerId) {
+      const key = `ledger:${body.volunteerId}`
+      const led = ((await this.state.storage.get(key)) as
+        | { totalWei: string; jobs: number; settledWei: string } | undefined)
+        ?? { totalWei: '0', jobs: 0, settledWei: '0' }
+      led.totalWei = (BigInt(led.totalWei) + amount).toString()
+      await this.state.storage.put(key, led)
+    }
+    if (body.project) {
+      const key = `ledger:project:${body.project}`
+      const led = ((await this.state.storage.get(key)) as
+        | { totalWei: string; jobs: number; settledWei: string } | undefined)
+        ?? { totalWei: '0', jobs: 0, settledWei: '0' }
+      led.totalWei = (BigInt(led.totalWei) + amount).toString()
+      await this.state.storage.put(key, led)
+    }
+    await this.audit('patronage', {
+      volunteerId: body.volunteerId, project: body.project,
+      amountWei: amount.toString(), note: body.note?.slice(0, 120),
+    })
+    return this.json({ ok: true })
+  }
+
+  private async credit(
+    volunteerId: string,
+    amountWei: string,
+    site?: string,
+    ownVisitor = false,
+    project?: string,
+    ownSupporter = false,
+    domain?: string,
+  ) {
     const key = `ledger:${volunteerId}`
     const led = ((await this.state.storage.get(key)) as
       | { totalWei: string; jobs: number; settledWei: string }
       | undefined) ?? { totalWei: '0', jobs: 0, settledWei: '0' }
-    led.totalWei = (BigInt(led.totalWei) + BigInt(amountWei || '0')).toString()
+    // Sybil-tiered payout: DID-bound nodes earn the full amount; anonymous
+    // nodes are capped at ANON_CAP_WEI lifetime — the excess converts to
+    // rep points instead of wei, so farming fresh volunteerIds can't mint
+    // money past the cap.
+    let amount = BigInt(amountWei || '0')
+    const meta = this.registry.get(volunteerId)
+    const anonCap = BigInt(this.env.ANON_CAP_WEI || '0')
+    if (!meta?.did && anonCap > 0n) {
+      const headroom = anonCap - BigInt(led.totalWei)
+      if (headroom < amount) {
+        const capped = headroom > 0n ? headroom : 0n
+        const excess = amount - capped
+        amount = capped
+        if (excess > 0n) await this.addRep(volunteerId, Math.floor(Number(excess / 1_000_000n)), 'anon-cap-conversion')
+      }
+    }
+    led.totalWei = (BigInt(led.totalWei) + amount).toString()
     led.jobs += 1
     await this.state.storage.put(key, led)
-    // Site-owner revenue share: when a site's own visitor completes that
-    // site's job, the site earns a 10% host share — the incentive that makes
-    // site owners promote visitor nodes.
+
+    // Rep accrual — 1 point per completed job (lane-scoped too when the job
+    // carried a domain, so rep in a lane is earned in that lane); referral
+    // rep to the recruiter is capped per referred node.
+    await this.addRep(volunteerId, 1, 'job', domain)
+    const ref = (await this.state.storage.get(`ref:${volunteerId}`)) as
+      | { referrer: string; jobs?: number } | undefined
+    const refCap = Number(this.env.REFERRAL_JOB_CAP || '50')
+    if (ref && (ref.jobs ?? 0) < refCap && ref.referrer !== volunteerId) {
+      ref.jobs = (ref.jobs ?? 0) + 1
+      await this.state.storage.put(`ref:${volunteerId}`, ref)
+      await this.addRep(ref.referrer, 1, 'referral')
+    }
+
+    // Reciprocity — cross-project compute co-op ledger: when a supporter of
+    // project A serves a job for project B, bank it under recip:A:B.
+    if (meta?.project && project && meta.project !== project) {
+      const rkey = `recip:${meta.project}:${project}`
+      const bal = BigInt(String(await this.state.storage.get(rkey) ?? '0'))
+      await this.state.storage.put(rkey, (bal + amount).toString())
+    }
+
+    // Pool budget + circuit breaker — once spend exceeds the configured
+    // cap the pool pauses (new submissions 503) until an admin unpauses.
+    if (project && this.env.PROJECT_BUDGETS) {
+      try {
+        const budgets = JSON.parse(this.env.PROJECT_BUDGETS) as Record<string, string>
+        const cap = budgets[project]
+        if (cap) {
+          const skey = `spend:project:${project}`
+          const spend = BigInt(String(await this.state.storage.get(skey) ?? '0')) + amount
+          await this.state.storage.put(skey, spend.toString())
+          if (spend > BigInt(cap)) {
+            await this.state.storage.put(`paused:project:${project}`, 1)
+            await this.audit('pool.paused', { project, spend: spend.toString(), cap })
+          }
+        }
+      } catch { /* malformed PROJECT_BUDGETS — no cap enforced */ }
+    }
+
+    // Rep bridge — fire-and-forget event webhook (delta-git consumes these).
+    if (this.env.REP_WEBHOOK_URL) {
+      const hook = this.env.REP_WEBHOOK_URL
+      void fetch(hook, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ event: 'job.credit', volunteerId, did: meta?.did, project, amountWei: amount.toString(), at: Date.now() }),
+      }).catch(() => {})
+    }
+    await this.audit('credit', { volunteerId, amount: amount.toString(), project })
+
+    // Host revenue share: when a site/project's own supporter completes its
+    // job, the host earns a 10% share — the incentive that makes hosts
+    // promote supporter nodes. Site and project shares can both apply when
+    // a pooled node serves a site job.
     if (site && ownVisitor) {
       const skey = `ledger:site:${site}`
       const s = ((await this.state.storage.get(skey)) as
@@ -519,6 +1602,15 @@ export class CoordinatorDO implements DurableObject {
       s.totalWei = (BigInt(s.totalWei) + (BigInt(amountWei || '0') / 10n)).toString()
       s.jobs += 1
       await this.state.storage.put(skey, s)
+    }
+    if (project && ownSupporter) {
+      const pkey = `ledger:project:${project}`
+      const p = ((await this.state.storage.get(pkey)) as
+        | { totalWei: string; jobs: number; settledWei: string }
+        | undefined) ?? { totalWei: '0', jobs: 0, settledWei: '0' }
+      p.totalWei = (BigInt(p.totalWei) + (BigInt(amountWei || '0') / 10n)).toString()
+      p.jobs += 1
+      await this.state.storage.put(pkey, p)
     }
   }
 
@@ -529,16 +1621,78 @@ export class CoordinatorDO implements DurableObject {
     return [...m.keys()]
   }
 
-  private countByTaskType(): Record<string, number> {
+  private countByTaskType(pool?: VolunteerMeta[]): Record<string, number> {
+    const counts: Record<string, number> = {}
+    for (const v of pool ?? this.registry.values())
+      for (const tt of v.taskTypes) counts[tt] = (counts[tt] || 0) + 1
+    return counts
+  }
+
+  private countByProject(): Record<string, number> {
     const counts: Record<string, number> = {}
     for (const v of this.registry.values())
-      for (const tt of v.taskTypes) counts[tt] = (counts[tt] || 0) + 1
+      if (v.project) counts[v.project] = (counts[v.project] || 0) + 1
     return counts
   }
 
   private bearerOk(req: Request, secret?: string): boolean {
     if (!secret) return false
     return req.headers.get('authorization') === `Bearer ${secret}`
+  }
+
+  /** Rep ledger — rep:<id> → { points, jobs, referrals }, plus lane-scoped
+   *  rep:lane:<domain>:<id> when a domain is set (jury weight is in-lane rep
+   *  only — rep in research doesn't qualify a juror for code lanes).
+   *  Points are non-transferable reputation; they gate premium dispatch
+   *  lanes and durable-tier admission in later phases. Negative points
+   *  (jury dissents, cap conversions) subtract — floor is 0. */
+  private async addRep(id: string, points: number, reason: string, lane?: string) {
+    if (!points) return
+    const apply = async (key: string) => {
+      const rep = ((await this.state.storage.get(key)) as
+        | { points: number; jobs: number; referrals: number } | undefined)
+        ?? { points: 0, jobs: 0, referrals: 0 }
+      rep.points = Math.max(0, rep.points + points)
+      if (reason === 'job') rep.jobs += 1
+      if (reason === 'referral') rep.referrals += 1
+      await this.state.storage.put(key, rep)
+    }
+    await apply(`rep:${id}`)
+    if (lane) await apply(`rep:lane:${lane.slice(0, 32)}:${id}`)
+  }
+
+  /** Tamper-evident audit chain — each entry carries the previous entry's
+   *  hash, so a forged gap breaks the chain. Storage is append-only;
+   *  `audit:last` holds the head. Exported via GET /audit (admin). */
+  private async audit(event: string, data: Record<string, unknown>) {
+    try {
+      const last = ((await this.state.storage.get('audit:last')) as
+        | { seq: number; hash: string } | undefined) ?? { seq: 0, hash: '0' }
+      const seq = last.seq + 1
+      const at = Date.now()
+      const entry = { seq, prev: last.hash, event, data, at }
+      const hash = await this.sha256Hex(JSON.stringify(entry))
+      await this.state.storage.put(`audit:${seq}`, { ...entry, hash })
+      await this.state.storage.put('audit:last', { seq, hash })
+    } catch (e) {
+      // Audit must never break the job path — log and continue.
+      console.error('[coordinator] audit write failed:', e)
+    }
+  }
+
+  private async sha256Hex(text: string): Promise<string> {
+    const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text))
+    return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('')
+  }
+
+  private async sha256HexBuf(buf: ArrayBuffer): Promise<string> {
+    const d = await crypto.subtle.digest('SHA-256', buf)
+    return [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, '0')).join('')
+  }
+
+  private async pausedProjects(): Promise<string[]> {
+    const keys = await this.keys('paused:project:')
+    return keys.map((k) => k.slice('paused:project:'.length))
   }
 
   private json(body: unknown, status = 200): Response {

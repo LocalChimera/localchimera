@@ -12,6 +12,7 @@
 export { ChimeraSDK } from './ChimeraSDK.js';
 export { PrivacyContainer } from './runtime/PrivacyContainer.js';
 export { useChimera, ChimeraWeb3AuthProvider } from './useChimera.js';
+export { connectWidespreadWallet } from './widespread-adapter.js';
 export { fetchWeb3AuthConfig, fetchWalletJwt, createMpcWalletFromJwt } from './web3auth-helpers.js';
 export { ChimeraButton } from './ChimeraButton.js';
 export { checkForUpdates, onUpdateAvailable, getSDKVersion } from './core/update-checker.js';
