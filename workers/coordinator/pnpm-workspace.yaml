@@ -1,5 +1,7 @@
 allowBuilds:
   esbuild: set this to true or false
+  onnxruntime-node: true
+  protobufjs: true
   workerd: set this to true or false
 minimumReleaseAgeExclude:
   - '@cloudflare/workers-types@5.20260928.1'

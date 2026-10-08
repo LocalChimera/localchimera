@@ -8,7 +8,11 @@
  * Usage:
  *   COORDINATOR_URL=https://coordinator.example.com \
  *   DISPATCH_AUTH_TOKEN=... \
- *   node scripts/eval.mjs [count] [timeoutSec] [concurrency]
+ *   node scripts/eval.mjs [count] [timeoutSec] [concurrency] [taskType] [payloadTemplate]
+ *
+ * payloadTemplate is a JSON-string template — `{i}` interpolates the job
+ * index. Defaults to an AGENT_INFER-shaped {prompt}. For BUILD_VERIFY:
+ *   node eval.mjs 10 60 4 301 '{"cmd":"node","args":["-e","console.log({i})"]}'
  *
  * Caveat: each /jobs call holds until result-or-timeout (coordinator's
  * JOB_RESULT_TIMEOUT_MS), so per-job latency includes queue wait.
@@ -18,6 +22,8 @@ const TOKEN = process.env.DISPATCH_AUTH_TOKEN
 const N = Number(process.argv[2]) || 10
 const TIMEOUT_S = Number(process.argv[3]) || 120
 const CONC = Number(process.argv[4]) || N
+const TASK_TYPE = Number(process.argv[5]) || 200
+const PAYLOAD_TPL = process.argv[6] || '{"prompt":"eval-{i}: reply with the single word ok"}'
 
 if (!TOKEN) { console.error('DISPATCH_AUTH_TOKEN required'); process.exit(1) }
 
@@ -29,8 +35,8 @@ async function oneJob(i) {
     const r = await fetch(`${COORD}/jobs`, {
       method: 'POST', headers: auth,
       body: JSON.stringify({
-        taskType: 200, // AGENT_INFER
-        payload: JSON.stringify({ prompt: `eval-${i}: reply with the single word ok` }),
+        taskType: TASK_TYPE,
+        payload: PAYLOAD_TPL.replaceAll('{i}', String(i)),
         priority: 'batch',
       }),
       signal: AbortSignal.timeout(TIMEOUT_S * 1000),

@@ -32,6 +32,7 @@ import { lintPayload, lintPayloadDeep, classificationOk, redactPayload, parseSea
 import { ESCROW_ABI, makeClients, resultHash, signDispatch } from './chain'
 import { verifyMessage, verifyTypedData } from 'viem'
 import type { Hex } from 'viem'
+import { verifyDidKey, decodeSig, contentHashToCid } from './didkey'
 
 /** Base mainnet USDC — the default x402 payment asset. */
 const USDC_BASE = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'
@@ -76,6 +77,11 @@ interface Env {
   REP_PREMIUM_PCT?: string
   /** Base URL for /weights/* redirects — R2 public bucket or CDN origin */
   WEIGHTS_MIRROR_URL?: string
+  /** IPFS gateway for ENS contenthash resolution (e.g. https://ipfs.io) */
+  IPFS_GATEWAY_URL?: string
+  /** Cloudflare Turnstile secret — when set, anonymous /jobs submissions
+   *  must carry a `cf-turnstile-response` in the body (anti-abuse gate). */
+  TURNSTILE_SECRET?: string
   /** Hashcash-style PoW gate on /jobs — sha256(payload:nonce) needs this many
    *  leading zero hex digits when >0. Set only if submissions get abused. */
   POW_DIFFICULTY?: string
@@ -141,6 +147,7 @@ interface JobEnvelope {
   shardCapacity?: number
   status?: string
   result?: string
+  resultSig?: string
   reason?: string
 }
 
@@ -291,6 +298,42 @@ export class CoordinatorDO implements DurableObject {
       const trust = (await this.state.storage.get(`trust:${id}`)) as number | undefined
       return this.json({ id, ...(rep ?? { points: 0, jobs: 0, referrals: 0 }), trust: trust ?? 0 })
     }
+    if (url.pathname === '/drill') {
+      // Disaster-recovery drill — recomputes the hash-chained audit log and
+      // cross-checks ledger totals against recorded job credits. Admin only.
+      // Answers "is the log intact" and "do the ledgers match the event
+      // stream" without a redeploy.
+      if (!this.bearerOk(req, this.env.ADMIN_TOKEN)) return this.json({ error: 'unauthorized' }, 401)
+      const entries = await this.state.storage.list({ prefix: 'audit:', limit: 5000 })
+      entries.delete('audit:last')
+      const sorted = [...entries.entries()].sort((a, b) => Number(a[0].slice(6)) - Number(b[0].slice(6)))
+      let prev = '0'
+      let broken: number | null = null
+      let checked = 0
+      for (const [key, v] of sorted) {
+        const e = v as { seq: number; prev: string; event: string; data: unknown; at: number; hash: string }
+        if (e.prev !== prev) { broken = e.seq; break }
+        const rehash = await this.sha256Hex(JSON.stringify({ seq: e.seq, prev: e.prev, event: e.event, data: e.data, at: e.at }))
+        if (rehash !== e.hash) { broken = e.seq; break }
+        prev = e.hash
+        checked++
+      }
+      const last = (await this.state.storage.get('audit:last')) as { seq?: number } | undefined
+      const chainOk = broken === null && (checked === 0 || (last?.seq ?? 0) === checked)
+      // Ledger sanity — every ledger:<id> should have totalWei >= settledWei.
+      const badLedgers: string[] = []
+      for (const key of await this.keys('ledger:')) {
+        const l = (await this.state.storage.get(key)) as { totalWei?: string; settledWei?: string } | undefined
+        if (!l) continue
+        if (BigInt(l.settledWei || '0') > BigInt(l.totalWei || '0')) badLedgers.push(key)
+      }
+      return this.json({
+        auditChain: { entries: checked, intact: chainOk, brokenAt: broken },
+        ledgers: { checked: (await this.keys('ledger:')).length, inconsistent: badLedgers },
+        pendingJobs: (await this.keys('pending:')).length,
+        assignments: (await this.keys('assigned:')).length,
+      })
+    }
     if (url.pathname === '/audit') {
       // Hash-chained audit export — admin only.
       if (!this.bearerOk(req, this.env.ADMIN_TOKEN)) return this.json({ error: 'unauthorized' }, 401)
@@ -315,7 +358,21 @@ export class CoordinatorDO implements DurableObject {
     }
     if (url.pathname === '/jobs' && req.method === 'POST') {
       const auth = await this.jobAuth(req)
-      if (!auth.ok) return this.json({ error: 'unauthorized' }, 401)
+      if (!auth.ok) {
+        // Anonymous submission path — only when TURNSTILE_SECRET is set and
+        // the body carries a solved cf-turnstile-response token. Anonymous
+        // jobs land in the global pool under anonymous quotas; they never
+        // touch project budgets because they're unscoped (no project).
+        const ts = this.env.TURNSTILE_SECRET
+        if (!ts) return this.json({ error: 'unauthorized' }, 401)
+        const probe = (await req.clone().json().catch(() => null)) as
+          | Record<string, unknown> | null
+        const tok = probe?.['cf-turnstile-response']
+        if (typeof tok !== 'string' || !(await this.verifyTurnstile(tok))) {
+          return this.json({ error: 'turnstile verification required' }, 403)
+        }
+        return this.handleDirectJob(req, undefined)
+      }
       return this.handleDirectJob(req, auth.project)
     }
     if (url.pathname === '/jobs/batch' && req.method === 'POST') {
@@ -420,6 +477,36 @@ export class CoordinatorDO implements DurableObject {
       }
       return this.json({ attestation, issuer: account?.address ?? null, sig })
     }
+    if (url.pathname.startsWith('/verify/')) {
+      // Provenance bundle — everything a consumer needs to verify a job's
+      // chain of custody offline: the coordinator's dispatch sig (EIP-191
+      // over chimera-job:<id>), the result hash, and the producing node's
+      // signature over chimera-result:<id>:<hash> when it presented one.
+      const jobId = url.pathname.slice(8)
+      const [job, result] = await Promise.all([
+        this.state.storage.get(`pending:${jobId}`),
+        this.state.storage.get(`result:${jobId}`),
+      ])
+      const handled = await this.state.storage.get(`handled:${jobId}`)
+      if (!job && !result) return this.json({ error: 'not found' }, 404)
+      const { account } = makeClients(this.env, this.rpcIdx)
+      let dispatchSig: string | null = null
+      if (account) {
+        try { dispatchSig = await signDispatch(account, jobId) } catch {}
+      }
+      return this.json({
+        jobId, handled: handled ?? null, job, result,
+        coordinator: account?.address ?? null,
+        dispatchSig,
+        resultHash: result && typeof (result as { result?: string }).result === 'string'
+          ? await this.sha256Hex((result as { result: string }).result)
+          : null,
+        schemes: {
+          dispatch: 'eip191:chimera-job:<jobId>',
+          result: 'eip191|ed25519:chimera-result:<jobId>:<sha256(result)>',
+        },
+      })
+    }
     if (url.pathname === '/mcp/tools' || url.pathname === '/mcp') {
       // Minimal MCP-style tool catalog — a real MCP server transport can
       // wrap these; swarm work is exposed as tools.
@@ -464,8 +551,13 @@ export class CoordinatorDO implements DurableObject {
     if (url.pathname === '/committee/vote' && req.method === 'POST') {
       // Rep-weighted decision log — groundwork for the federated committee:
       // votes only count from rep-holding volunteerIds, one vote each.
-      const body = (await req.json().catch(() => ({}))) as { id?: string; voter?: string; approve?: boolean }
-      if (!body.id || !body.voter) return this.json({ error: 'id + voter required' }, 400)
+      // Byzantine gate: the ballot must carry `sig` — a signature over
+      // `chimera-vote:<motionId>:<yes|no>` by the voter's registered DID
+      // (didbind:<id> persisted at REGISTER). Unsigned or mis-signed votes
+      // are rejected — a forged ballot is the classic Byzantine move.
+      const body = (await req.json().catch(() => ({}))) as
+        | { id?: string; voter?: string; approve?: boolean; sig?: string } | null
+      if (!body?.id || !body.voter) return this.json({ error: 'id + voter required' }, 400)
       const m = (await this.state.storage.get(`committee:${body.id}`)) as
         | { yes: number; no: number; votes: Record<string, number>; motion: string; closed?: boolean } | undefined
       if (!m || m.closed) return this.json({ error: 'motion not found/closed' }, 404)
@@ -473,6 +565,23 @@ export class CoordinatorDO implements DurableObject {
       const rep = (await this.state.storage.get(`rep:${body.voter}`)) as { points?: number } | undefined
       const weight = rep?.points ?? 0
       if (weight <= 0) return this.json({ error: 'voter holds no rep' }, 403)
+      const voterDid = (await this.state.storage.get(`didbind:${body.voter}`)) as string | undefined
+      if (!voterDid) return this.json({ error: 'voter has no DID binding — register with did+sig first' }, 403)
+      if (!body.sig) return this.json({ error: 'signed ballot required: sign chimera-vote:<id>:<yes|no>' }, 400)
+      const msg = `chimera-vote:${body.id}:${body.approve ? 'yes' : 'no'}`
+      let ok = false
+      try {
+        if (voterDid.startsWith('did:key:')) {
+          const sigBytes = decodeSig(body.sig)
+          if (sigBytes) ok = await verifyDidKey(voterDid, msg, sigBytes)
+        } else {
+          ok = await verifyMessage({ address: voterDid as Hex, message: msg, signature: body.sig as Hex })
+        }
+      } catch { ok = false }
+      if (!ok) {
+        await this.audit('committee.bad-sig', { motion: body.id, voter: body.voter })
+        return this.json({ error: 'invalid ballot signature' }, 403)
+      }
       m.votes[body.voter] = body.approve ? weight : -weight
       if (body.approve) m.yes += weight; else m.no += weight
       const quorum = Number(this.env.JURY_QUORUM || '3')
@@ -546,23 +655,36 @@ export class CoordinatorDO implements DurableObject {
           ws.close(4009, 'id in use')
           return
         }
-        // DID binding — the node signs `chimera-bind:<volunteerId>` with its
-        // operator key; verified via EIP-191 recovery. DID-bound nodes get
-        // full payouts and rep events; anonymous nodes are payout-capped.
+        // DID binding — two schemes, same trust tier:
+        //  • EOA (0x…) — EIP-191 over `chimera-bind:<volunteerId>`
+        //  • did:key:z… — raw ed25519 over the same message (did:key's key
+        //    material is self-contained; no resolver call needed)
+        // DID-bound nodes get full payouts and rep events; anonymous nodes
+        // are payout-capped.
         let did: string | undefined
         if (typeof env.did === 'string' && typeof env.sig === 'string') {
           try {
-            const ok = await verifyMessage({
-              address: env.did as Hex,
-              message: `chimera-bind:${id}`,
-              signature: env.sig as Hex,
-            })
+            let ok = false
+            if (env.did.startsWith('did:key:')) {
+              const sigBytes = decodeSig(env.sig)
+              if (sigBytes) ok = await verifyDidKey(env.did, `chimera-bind:${id}`, sigBytes)
+            } else {
+              ok = await verifyMessage({
+                address: env.did as Hex,
+                message: `chimera-bind:${id}`,
+                signature: env.sig as Hex,
+              })
+            }
             if (ok) did = env.did
             else console.warn(`[coordinator] ${id} presented invalid DID sig`)
           } catch {
             console.warn(`[coordinator] ${id} DID verify failed`)
           }
         }
+        // Persist the DID binding — the live registry is volatile (drops on
+        // disconnect), but committee votes and proof verification need the
+        // DID even when the node is offline.
+        if (did) await this.state.storage.put(`didbind:${id}`, did)
         const meta: VolunteerMeta = {
           id,
           address: env.address || '',
@@ -609,7 +731,9 @@ export class CoordinatorDO implements DurableObject {
       case 'JOB_RESULT': {
         const meta = this.metaFor(ws)
         if (env.jobId && typeof env.result === 'string' && meta) {
-          void this.onJobResult(env.jobId, meta.id, env.result.slice(0, MAX_RESULT_BYTES))
+          void this.onJobResult(
+            env.jobId, meta.id, env.result.slice(0, MAX_RESULT_BYTES),
+            typeof env.resultSig === 'string' ? env.resultSig : undefined)
         }
         break
       }
@@ -874,7 +998,7 @@ export class CoordinatorDO implements DurableObject {
     await this.state.storage.delete(`assigned:${jobId}`)
   }
 
-  private async onJobResult(jobId: string, volunteerId: string, result: string) {
+  private async onJobResult(jobId: string, volunteerId: string, result: string, resultSig?: string) {
     const assignment = (await this.state.storage.get(`assigned:${jobId}`)) as
       | { volunteerId: string; at: number }
       | undefined
@@ -1015,9 +1139,29 @@ export class CoordinatorDO implements DurableObject {
     const durMs = Math.max(0, Date.now() - assignmentAt)
     const cores = Number(this.registry.get(volunteerId)?.capabilities?.cpuCores ?? 2)
     const estWh = Number((((cores * 4 + 5) * durMs) / 3_600_000).toFixed(4))
+    // Result proof — a DID-bound node signs `chimera-result:<jobId>:<hash>`
+    // so a consumer can prove *this registered node* produced *this result*.
+    // Verified eagerly; an invalid sig is stored as unproven, not trusted.
+    let proof: { did: string; sig: string; verified: boolean } | undefined
+    const nodeDid = this.registry.get(volunteerId)?.did
+    if (resultSig && nodeDid) {
+      const msg = `chimera-result:${jobId}:${await this.sha256Hex(result)}`
+      let verified = false
+      try {
+        if (nodeDid.startsWith('did:key:')) {
+          const sigBytes = decodeSig(resultSig)
+          if (sigBytes) verified = await verifyDidKey(nodeDid, msg, sigBytes)
+        } else {
+          verified = await verifyMessage({ address: nodeDid as Hex, message: msg, signature: resultSig as Hex })
+        }
+      } catch { /* malformed sig → unproven */ }
+      proof = { did: nodeDid, sig: resultSig.slice(0, 512), verified }
+      if (!verified) await this.audit('result.bad-sig', { jobId, volunteerId })
+    }
     await this.state.storage.put(`result:${jobId}`, {
       volunteerId, result, at: Date.now(), source: job.source,
       sandbox: 'quoted', estWh, group: job.group, resultToken: job.resultToken,
+      ...(proof ? { proof } : {}),
     })
 
     // Spot-check adjudication — a replica job (verifyOf set) is compared to
@@ -1238,6 +1382,7 @@ export class CoordinatorDO implements DurableObject {
     if (lintHit) {
       return this.json({ error: `payload rejected by lint: ${lintHit}` }, 400)
     }
+
     // Per-identity daily quota — keyed on the project token slug (or
     // 'global' for the master token). Best-effort anti-abuse: a misbehaving
     // submitter can still spread across slugs, which is why the real brake
@@ -1569,14 +1714,37 @@ export class CoordinatorDO implements DurableObject {
    *  through ENS naming. Requires ENS_RPC (mainnet). */
   private async handleEns(name: string): Promise<Response> {
     try {
-      const { createPublicClient, http } = await import('viem')
+      const { createPublicClient, http, namehash } = await import('viem')
       const { mainnet } = await import('viem/chains')
       const pub = createPublicClient({ chain: mainnet, transport: http(this.env.ENS_RPC) })
-      const [address, url] = await Promise.all([
+      const node = namehash(name)
+      const [address, url, resolverAddr] = await Promise.all([
         pub.getEnsAddress({ name: name as never }).catch(() => null),
         pub.getEnsText({ name: name as never, key: 'url' }).catch(() => null),
+        pub.getEnsResolver({ name: name as never }).catch(() => null),
       ])
-      return this.json({ name, address, url })
+      // EIP-1577 contenthash — read contenthash(node) off the name's
+      // resolver. Returns raw multicodec bytes; we decode the common IPFS
+      // shape (e3 01 = ipfs-ns, followed by the CIDv1 binary).
+      let contentHash: string | null = null
+      let cid: string | null = null
+      if (resolverAddr) {
+        const raw = await pub.readContract({
+          address: resolverAddr, functionName: 'contenthash', args: [node],
+          abi: [{ name: 'contenthash', type: 'function', stateMutability: 'view',
+                  inputs: [{ name: 'node', type: 'bytes32' }], outputs: [{ type: 'bytes' }] }],
+        }).catch(() => null)
+        if (typeof raw === 'string' && raw.length > 8 && raw !== '0x') {
+          contentHash = raw
+          cid = contentHashToCid(raw)
+        }
+      }
+      return this.json({
+        name, address, url, contentHash, cid,
+        gatewayUrl: cid && this.env.IPFS_GATEWAY_URL
+          ? `${this.env.IPFS_GATEWAY_URL.replace(/\/$/, '')}/ipfs/${cid}/`
+          : null,
+      })
     } catch (e) {
       return this.json({ error: `ens lookup failed: ${String(e).slice(0, 120)}` }, 502)
     }
@@ -1855,6 +2023,23 @@ export class CoordinatorDO implements DurableObject {
     } catch (e) {
       // Audit must never break the job path — log and continue.
       console.error('[coordinator] audit write failed:', e)
+    }
+  }
+
+  /** Cloudflare Turnstile siteverify — proves the submitter solved a
+   *  challenge, raising the cost of bulk anonymous /jobs spam. */
+  private async verifyTurnstile(token: string): Promise<boolean> {
+    try {
+      const res = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
+        method: 'POST',
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ secret: this.env.TURNSTILE_SECRET!, response: token }),
+        signal: AbortSignal.timeout(10_000),
+      })
+      const body = (await res.json()) as { success?: boolean }
+      return body.success === true
+    } catch {
+      return false
     }
   }
 
