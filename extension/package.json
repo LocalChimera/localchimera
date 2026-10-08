@@ -7,11 +7,9 @@
     "build": "node build.mjs"
   },
   "devDependencies": {
-    "@huggingface/transformers": "^3.7.6",
     "esbuild": "^0.25.0"
   },
   "dependencies": {
-    "@wllama/wllama": "3.6.1",
-    "@wllama/wllama-compat": "3.6.1"
+    "@wllama/wllama": "3.6.1"
   }
 }

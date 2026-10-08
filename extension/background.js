@@ -1,8 +1,9 @@
 // Chimera Compute extension — durable-ish volunteer node for MV3.
 // Store-compliant: no remotely-hosted code executes (CSP forbids it), so all
 // job logic is bundled here. The infer lane (taskType 200) activates iff the
-// build step produced vendor/transformers.js (esbuild bundle of
-// @huggingface/transformers); without it the node serves fetch/pin/canary.
+// build step produced vendor/wllama-page.js + vendor/wllama.wasm (esbuild
+// bundle of @wllama/wllama — llama.cpp compiled to WASM/WebGPU); without it
+// the node serves fetch/pin/canary.
 //
 // Consent: off by default; chrome.storage.local.consent must be true (set by
 // the popup toggle). Wipe = extension uninstall or popup "Forget me".
@@ -20,25 +21,17 @@ const TASK_TYPES = [1, 205, 206]; // STORAGE pin, WEB_FETCH, CANARY
 
 let ws = null, heartbeat = null, volunteerId = null;
 let idKey = null, idDid = null;
-let transformers = null;
 
-// Infer lane — AGENT_INFER (200) prefers the wllama lane (llama.cpp →
-// WASM/WebGPU in a cross-origin-isolated offscreen document; GGUF weights) and
-// falls back to vendored transformers.js. MV3 CSP forbids remote code, so both
-// engines must be produced at pack time by build.mjs → vendor/*. If neither
-// artifact is in the package the lane isn't claimed — the node still serves
-// fetch/pin/canary.
+// Infer lane — AGENT_INFER (200) runs on wllama: llama.cpp → WASM/WebGPU in a
+// cross-origin-isolated offscreen document (manifest COOP/COEP keys), GGUF
+// weights — the same model/format as the durable Ollama lane, zero installs
+// beyond the extension itself. It is the fastest in-browser engine we
+// measured; the compat single-thread build (slower than ONNX) and the
+// transformers.js lane were removed rather than shipped as fallbacks — if the
+// threaded build can't engage, taskType 200 goes unclaimed and the node still
+// serves fetch/pin/canary.
 const WLLAMA_MODEL =
   'https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf';
-
-async function loadInfer() {
-  if (transformers) return true;
-  try {
-    const m = await import('./vendor/transformers.js');
-    transformers = m.pipeline ? m : m.default;
-    return !!transformers?.pipeline;
-  } catch { return false; }
-}
 
 let wllamaAssets = null;
 async function wllamaAvailable() {
@@ -48,12 +41,10 @@ async function wllamaAvailable() {
 }
 
 async function claimInfer() {
-  if (!TASK_TYPES.includes(200) && ((await wllamaAvailable()) || (await loadInfer())))
-    TASK_TYPES.push(200);
+  if (!TASK_TYPES.includes(200) && (await wllamaAvailable())) TASK_TYPES.push(200);
 }
 
 async function wllamaInfer(prompt, maxTokens) {
-  if (!(await wllamaAvailable())) throw new Error('wllama lane unavailable');
   if (!(await chrome.offscreen.hasDocument?.().catch(() => false))) {
     await chrome.offscreen.createDocument({
       url: 'wllama-page.html',
@@ -70,23 +61,11 @@ async function wllamaInfer(prompt, maxTokens) {
   return res.text;
 }
 
-let inferPipe = null;
 async function runInfer(payload) {
-  const { prompt, model, maxTokens } = JSON.parse(payload);
-  try {
-    return { text: await wllamaInfer(prompt, maxTokens), engine: 'wllama' };
-  } catch { /* wllama page/engine unavailable → ONNX lane */ }
-  if (!(await loadInfer())) throw new Error('infer lane unavailable');
-  // Small instruct model; weights fetch+cache via transformers.js Cache API.
-  inferPipe ??= await transformers.pipeline(
-    'text-generation',
-    model || 'HuggingFaceTB/SmolLM2-135M-Instruct',
-    { dtype: 'q4' },
-  );
-  const out = await inferPipe(prompt, { max_new_tokens: maxTokens || 256, do_sample: false });
-  const text = out?.[0]?.generated_text ?? '';
+  const { prompt, maxTokens } = JSON.parse(payload);
+  const text = await wllamaInfer(prompt, maxTokens);
   if (!text) throw new Error('empty generation');
-  return { text: text.slice(prompt.length).trim() || text, engine: 'transformers.js' };
+  return { text, engine: 'wllama' };
 }
 
 async function ensureId() {

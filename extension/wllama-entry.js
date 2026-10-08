@@ -1,8 +1,8 @@
 // Offscreen-page logic for the wllama lane (llama.cpp → WASM/WebGPU).
 // The page runs cross-origin-isolated (manifest COOP/COEP keys), so
-// SharedArrayBuffer + JSPI are available → the threaded main build.
-// On hosts without isolation support the library degrades to the compat
-// single-thread build automatically.
+// SharedArrayBuffer + JSPI engage the threaded build. Without isolation the
+// lane refuses: the compat single-thread build measured slower than the
+// engines it replaced, so it was removed rather than shipped.
 // background.js drives this page via chrome.runtime.sendMessage.
 import { Wllama } from '@wllama/wllama/esm/index.js'
 
@@ -11,11 +11,10 @@ let loadedUrl = null
 let loading = null
 
 async function ensureWllama(modelUrl) {
+  if (!crossOriginIsolated) throw new Error('wllama requires a cross-origin-isolated context')
   if (!wllama || loadedUrl && loadedUrl !== modelUrl) {
     try { await wllama?.exit() } catch {}
-    const url = (p) => chrome.runtime.getURL(p)
-    wllama = new Wllama({ default: url('vendor/wllama.wasm') }, { suppressNativeLog: true })
-    wllama.setCompat({ worker: url('vendor/wllama-compat.js'), wasm: url('vendor/wllama-compat.wasm') })
+    wllama = new Wllama({ default: chrome.runtime.getURL('vendor/wllama.wasm') }, { suppressNativeLog: true })
     loadedUrl = null
   }
   if (loadedUrl === modelUrl) return wllama
