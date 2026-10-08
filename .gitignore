@@ -74,3 +74,6 @@ qvac/scripts/
 
 # Local wrangler dev state (sqlite DO/KV/D1/R2 emulators)
 **/.wrangler/
+
+# Extension build artifacts (vendor/transformers.js is produced by build.mjs)
+extension/vendor/

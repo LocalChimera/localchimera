@@ -57,8 +57,16 @@ new_sqlite_classes = ["CoordinatorDO"]
 #   X402_USDC              — USDC contract (default Base USDC)
 #   X402_FACILITATOR       — facilitator base URL; unset → coordinator broadcasts
 #     the EIP-3009 authorization itself when COORDINATOR_PRIVATE_KEY is funded
-#   PROVER_URL             — opML/zkVM prover adapter endpoint; completed jobs are
-#     POSTed {jobId, taskType, payloadHash, resultHash, nodeDid} for proving
+#   PROVER_URL             — deterministic-replay prover (scripts/prover.mjs);
+#     completed jobs are POSTed {jobId, taskType, inputHash, outputHash,
+#     nodeDid, jobUrl}; the signed proof lands as execProof on /verify.
+#     The prover fetches the job I/O through the resultToken-gated jobUrl.
+#   CHALLENGE_SLASH        — rep burned from a dispute's losing side (default 10)
+#   COMMITTEE_PEERS        — comma-separated replica base URLs; proposals +
+#     ballots replicate/gossip so each deployment reaches its own quorum
+#   FEDERATION_TOKEN       — shared Bearer secret for /committee/replicate +
+#     /committee/ballot; every replica must share it
+#   COMMITTEE_SIZE         — roster cap per motion (top-N voters by weight)
 #   PRIVACYPASS_ISSUER_KEY — base64 SPKI of the trusted RFC 9578 token issuer;
 #     enables Authorization: PrivateToken redemption on anonymous /jobs
 #   PRIVACYPASS_ORIGIN     — origin name bound into token challenges

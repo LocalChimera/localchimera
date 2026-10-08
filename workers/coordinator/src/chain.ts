@@ -1,6 +1,6 @@
 /** viem clients + the VolunteerEscrow ABI the DO talks to. */
 import {
-  createPublicClient, createWalletClient, http, keccak256, toHex,
+  createPublicClient, createWalletClient, http, hexToSignature, keccak256, toHex,
   type Address, type Hex,
 } from 'viem'
 import { base, baseSepolia } from 'viem/chains'
@@ -88,6 +88,32 @@ export const USDC_EIP3009_ABI = [
     outputs: [],
   },
 ] as const
+
+export interface Eip3009Authorization {
+  from: string; to: string; value: string;
+  validAfter: string; validBefore: string; nonce: string
+}
+
+/** Decode an x402 'exact' payment header into the EIP-3009 authorization +
+ *  split signature ready for transferWithAuthorization. Returns null on any
+ *  malformed input — callers treat null as "not settleable", not as an
+ *  authorization failure (signature validity was already checked upstream). */
+export function decodeEip3009Payment(xpay: string):
+  | { auth: Eip3009Authorization; v: number; r: Hex; s: Hex }
+  | null {
+  try {
+    const p = JSON.parse(atob(xpay)) as {
+      payload?: { signature?: string; authorization?: Eip3009Authorization }
+    }
+    const auth = p.payload?.authorization
+    const sig = p.payload?.signature
+    if (!auth || !sig) return null
+    const { r, s, v } = hexToSignature(sig as Hex)
+    return { auth, v: Number(v), r, s }
+  } catch {
+    return null
+  }
+}
 
 /** Sign the dispatch envelope so nodes can verify a job came from this
  *  coordinator (node-side verification is opt-in — the signature is always

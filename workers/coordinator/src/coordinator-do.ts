@@ -29,8 +29,8 @@
 import type { VolunteerMeta } from './registry'
 import { normalizeTaskTypes, stripSwarmClaims, selectVolunteer, validateJobResult, PROJECT, CANONICAL } from './registry'
 import { lintPayload, lintPayloadDeep, classificationOk, redactPayload, parseSealed, stripInstructions, leaksSealed } from './lint'
-import { ESCROW_ABI, USDC_EIP3009_ABI, makeClients, resultHash, signDispatch } from './chain'
-import { verifyMessage, verifyTypedData, hexToSignature } from 'viem'
+import { ESCROW_ABI, USDC_EIP3009_ABI, decodeEip3009Payment, makeClients, resultHash, signDispatch } from './chain'
+import { verifyMessage, verifyTypedData } from 'viem'
 import type { Hex } from 'viem'
 import { verifyDidKey, decodeSig, contentHashToCid } from './didkey'
 import { hasPrivateToken, verifyPrivateToken } from './privacypass'
@@ -105,8 +105,22 @@ interface Env {
    *  results are POSTed for proving; the returned proofRef attaches to the
    *  result record and surfaces in /verify as execProof. */
   PROVER_URL?: string
-  /** Bounded jury quorum — siblings needed before adjudication (default 3) */
+  /** Bounded jury quorum — siblings needed before adjudication (default 3).
+   *  Also the legacy committee quorum for roster-less motions. */
   JURY_QUORUM?: string
+  /** Comma-separated peer replica URLs — when set, committee proposals and
+   *  ballots are gossiped so each deployment reaches an independent commit
+   *  (multi-deployment BFT: quorum = >2/3 of the proposal's roster weight). */
+  COMMITTEE_PEERS?: string
+  /** Shared secret authenticating /committee/replicate + /committee/ballot
+   *  between federated deployments. Required for peer ingress. */
+  FEDERATION_TOKEN?: string
+  /** Max committee roster size — top-N rep-holders at proposal time
+   *  (default 21). Bounds quorum to active weight, like a validator set. */
+  COMMITTEE_SIZE?: string
+  /** Rep points slashed from the losing side of a /challenge dispute
+   *  (default 10). */
+  CHALLENGE_SLASH?: string
   /** Optional mainnet RPC for ENS content-hash resolution */
   ENS_RPC?: string
   /** Pending-job TTL — an undispatchable job (no volunteer claims its
@@ -183,6 +197,40 @@ interface DirectJobBody {
 }
 
 const MAX_RESULT_BYTES = 256 * 1024
+
+// ── Federated committee (multi-deployment BFT) ──
+// A SignedBallot is portable evidence: any replica — or any external
+// verifier reading GET /committee/:id — can re-verify the signature
+// against the roster DID and recount the weighted tally.
+interface SignedBallot {
+  voter: string
+  approve: boolean
+  sig: string
+  phase: 'prevote' | 'precommit'
+}
+
+interface CommitteeMotion {
+  motion: string
+  at: number
+  phase: 'prevote' | 'precommit' | 'committed' | 'failed'
+  yes: number
+  no: number
+  /** voter → signed weight (current phase tally boxes, kept for compat) */
+  prevotes: Record<string, number>
+  precommits: Record<string, number>
+  /** voter → ballot, per phase — the exportable quorum certificate */
+  ballots: { prevote: Record<string, SignedBallot>; precommit: Record<string, SignedBallot> }
+  /** future-phase ballots received early (gossip reordering) */
+  pending: Record<string, SignedBallot>
+  /** roster snapshot — deterministic weight/DID source across replicas */
+  roster?: Record<string, { did: string; weight: number }>
+  quorum?: number
+  /** voter → the two conflicting signed ballots (Byzantine evidence) */
+  equivocators?: Record<string, { a: SignedBallot; b: SignedBallot }>
+  closed?: boolean
+  /** legacy field from the pre-phase implementation */
+  votes?: Record<string, number>
+}
 
 export class CoordinatorDO implements DurableObject {
   private state: DurableObjectState
@@ -599,71 +647,92 @@ export class CoordinatorDO implements DurableObject {
       const body = (await req.json().catch(() => ({}))) as { motion?: string }
       if (!body.motion) return this.json({ error: 'motion required' }, 400)
       const id = crypto.randomUUID()
-      await this.state.storage.put(`committee:${id}`, {
+      // Roster snapshot — every federated replica must weight ballots
+      // identically, so the proposal carries {voter: {did, weight}} rather
+      // than letting each replica consult its own rep table. Peers verify
+      // ballot signatures against the roster DIDs, so a replica needs no
+      // local rep state to reach an independent commit.
+      const roster = await this.committeeRoster()
+      const totalWeight = Object.values(roster).reduce((s, r) => s + r.weight, 0)
+      if (totalWeight <= 0) return this.json({ error: 'no rep-weighted voters bound' }, 400)
+      const motion: CommitteeMotion = {
         motion: body.motion.slice(0, 500), at: Date.now(),
-        phase: 'prevote',                       // prevote → precommit → committed|failed
+        phase: 'prevote',
         yes: 0, no: 0, prevotes: {}, precommits: {},
-      })
-      return this.json({ id })
+        ballots: { prevote: {}, precommit: {} }, pending: {},
+        roster, quorum: Math.floor((2 * totalWeight) / 3) + 1,
+      }
+      await this.state.storage.put(`committee:${id}`, motion)
+      // Replicate proposal to peer deployments (best-effort; peers that
+      // miss it still accept client-fanned ballots only after replicate).
+      this.gossipPeers('/committee/replicate', { id, ...motion })
+      return this.json({ id, quorum: motion.quorum, rosterWeight: totalWeight, peers: this.committeePeers().length })
+    }
+    if (url.pathname === '/committee/replicate' && req.method === 'POST') {
+      // Federation ingress — peer deployments share FEDERATION_TOKEN;
+      // membership in the replica set is operator-configured (COMMITTEE_PEERS).
+      if (!this.env.FEDERATION_TOKEN || !this.bearerOk(req, this.env.FEDERATION_TOKEN)) {
+        return this.json({ error: 'unauthorized' }, 401)
+      }
+      const p = (await req.json().catch(() => ({}))) as ({ id?: string } & Partial<CommitteeMotion>) | null
+      if (!p?.id || !p.motion || !p.roster || !p.quorum) return this.json({ error: 'bad proposal' }, 400)
+      const existing = await this.state.storage.get(`committee:${p.id}`) as CommitteeMotion | undefined
+      if (existing) return this.json({ ok: true, dedup: true, phase: existing.phase })
+      const motion: CommitteeMotion = {
+        motion: p.motion.slice(0, 500), at: p.at ?? Date.now(), phase: 'prevote',
+        yes: 0, no: 0, prevotes: {}, precommits: {},
+        ballots: { prevote: {}, precommit: {} }, pending: {},
+        roster: p.roster, quorum: p.quorum,
+      }
+      await this.state.storage.put(`committee:${p.id}`, motion)
+      await this.audit('committee.replicated', { motion: p.id, voters: Object.keys(p.roster).length })
+      // Drain ballots that arrived before the proposal (gossip races).
+      const buf = (await this.state.storage.get(`ballotbuf:${p.id}`)) as SignedBallot[] | undefined
+      if (buf?.length) {
+        await this.state.storage.delete(`ballotbuf:${p.id}`)
+        for (const b of buf) await this.tallyBallot(p.id, b, false)
+      }
+      return this.json({ ok: true, id: p.id })
     }
     if (url.pathname === '/committee/vote' && req.method === 'POST') {
-      // 2-phase BFT-lite: a motion commits only after a prevote quorum AND a
-      // precommit quorum (both ≥ JURY_QUORUM rep-weight, yes>2·no at prevote
-      // to advance, yes≥quorum at precommit to commit). A quorum of `no` in
-      // either phase fails the motion. Ballots are bound to their phase —
-      // the signed message is `chimera-vote:<id>:<phase>:<yes|no>` — so a
-      // prevote can't be replayed as a precommit. This is honest 2-phase
-      // commit *within one coordinator*; cross-deployment federation needs
-      // a shared log and is still future work.
+      // 2-phase BFT, federated: a motion commits only after a prevote
+      // quorum AND a precommit quorum. With a roster snapshot the quorum is
+      // >2/3 of total roster weight (classic BFT supermajority); legacy
+      // roster-less motions keep JURY_QUORUM. Ballots sign
+      // `chimera-vote:<id>:<phase>:<yes|no>` — phase-bound, replay-safe.
+      // Each replica tallies independently and exports its QC (the signed
+      // ballot set) via GET /committee/:id — no replica is a trust root.
       const body = (await req.json().catch(() => ({}))) as
         | { id?: string; voter?: string; approve?: boolean; sig?: string; phase?: 'prevote' | 'precommit' } | null
       if (!body?.id || !body.voter) return this.json({ error: 'id + voter required' }, 400)
-      const m = (await this.state.storage.get(`committee:${body.id}`)) as
-        | { yes: number; no: number; prevotes?: Record<string, number>; precommits?: Record<string, number>
-            votes?: Record<string, number>; motion: string; phase?: string; closed?: boolean } | undefined
-      if (!m || m.closed) return this.json({ error: 'motion not found/closed' }, 404)
-      m.phase ??= 'prevote'                    // migrate pre-phase records
-      m.prevotes ??= m.votes ?? {}; m.precommits ??= {}
-      const phase = body.phase ?? 'prevote'
-      if (phase !== m.phase) return this.json({ error: `motion is in ${m.phase} phase` }, 409)
-      const ballotBox = phase === 'prevote' ? m.prevotes : m.precommits
-      if (ballotBox[body.voter] !== undefined) return this.json({ error: 'already voted this phase' }, 409)
-      const rep = (await this.state.storage.get(`rep:${body.voter}`)) as { points?: number } | undefined
-      const weight = rep?.points ?? 0
-      if (weight <= 0) return this.json({ error: 'voter holds no rep' }, 403)
-      const voterDid = (await this.state.storage.get(`didbind:${body.voter}`)) as string | undefined
-      if (!voterDid) return this.json({ error: 'voter has no DID binding — register with did+sig first' }, 403)
-      if (!body.sig) return this.json({ error: 'signed ballot required: sign chimera-vote:<id>:<phase>:<yes|no>' }, 400)
-      const msg = `chimera-vote:${body.id}:${phase}:${body.approve ? 'yes' : 'no'}`
-      let ok = false
-      try {
-        if (voterDid.startsWith('did:key:')) {
-          const sigBytes = decodeSig(body.sig)
-          if (sigBytes) ok = await verifyDidKey(voterDid, msg, sigBytes)
-        } else {
-          ok = await verifyMessage({ address: voterDid as Hex, message: msg, signature: body.sig as Hex })
-        }
-      } catch { ok = false }
-      if (!ok) {
-        await this.audit('committee.bad-sig', { motion: body.id, voter: body.voter, phase })
-        return this.json({ error: 'invalid ballot signature' }, 403)
+      if (body.approve === undefined || !body.sig) {
+        return this.json({ error: 'signed ballot required: sign chimera-vote:<id>:<phase>:<yes|no>' }, 400)
       }
-      ballotBox[body.voter] = body.approve ? weight : -weight
-      const quorum = Number(this.env.JURY_QUORUM || '3')
-      let phaseYes = 0, phaseNo = 0
-      for (const w of Object.values(ballotBox)) { if (w > 0) phaseYes += w; else phaseNo -= w }
-      if (body.approve) m.yes = Math.max(m.yes, 0); // keep cumulative fields meaningful
-      if (phase === 'prevote' && phaseYes >= quorum && phaseYes > 2 * phaseNo) {
-        m.phase = 'precommit'
-      } else if (phaseNo >= quorum) {
-        m.phase = 'failed'; m.closed = true
-      } else if (phase === 'precommit' && phaseYes >= quorum) {
-        m.phase = 'committed'; m.closed = true
+      const ballot: SignedBallot = { voter: body.voter, approve: !!body.approve, sig: body.sig, phase: body.phase ?? 'prevote' }
+      const res = await this.tallyBallot(body.id, ballot, true)
+      return this.json(res.body, res.status)
+    }
+    if (url.pathname === '/committee/ballot' && req.method === 'POST') {
+      // Gossiped ballot ingress from peer replicas — same verification,
+      // no re-gossip (the client fan-out is the primary delivery path).
+      if (!this.env.FEDERATION_TOKEN || !this.bearerOk(req, this.env.FEDERATION_TOKEN)) {
+        return this.json({ error: 'unauthorized' }, 401)
       }
-      m.yes = phaseYes; m.no = phaseNo
-      await this.state.storage.put(`committee:${body.id}`, m)
-      await this.audit('committee.vote', { motion: body.id, voter: body.voter, weight, approve: !!body.approve, phase })
-      return this.json({ ok: true, phase: m.phase, yes: phaseYes, no: phaseNo, closed: !!m.closed })
+      const b = (await req.json().catch(() => ({}))) as ({ id?: string } & Partial<SignedBallot>) | null
+      if (!b?.id || !b.voter || b.approve === undefined || !b.sig || !b.phase) {
+        return this.json({ error: 'bad ballot' }, 400)
+      }
+      const res = await this.tallyBallot(b.id, { voter: b.voter, approve: b.approve, sig: b.sig, phase: b.phase }, false)
+      return this.json(res.body, res.status)
+    }
+    if (url.pathname.startsWith('/committee/') && req.method === 'GET') {
+      // Quorum-certificate export — the full signed ballot set + roster so
+      // ANY observer (not just replicas) can re-verify the decision.
+      if (!this.bearerOk(req, this.env.ADMIN_TOKEN)) return this.json({ error: 'unauthorized' }, 401)
+      const id = url.pathname.slice('/committee/'.length)
+      const m = await this.state.storage.get(`committee:${id}`) as CommitteeMotion | undefined
+      if (!m) return this.json({ error: 'not found' }, 404)
+      return this.json({ id, ...m })
     }
     if (url.pathname === '/.well-known/ens' && url.searchParams.get('name')) {
       if (!this.env.ENS_RPC) return this.json({ error: 'ENS not configured' }, 501)
@@ -683,6 +752,75 @@ export class CoordinatorDO implements DurableObject {
       }
       if (r && r.resultToken) delete (r as Record<string, unknown>).resultToken
       return r ? this.json(r) : this.json({ error: 'not found' }, 404)
+    }
+    if (url.pathname === '/challenge' && req.method === 'POST') {
+      // Optimistic-verification dispute game (opML pattern): results are
+      // accepted optimistically; a DID-bound node may challenge by signing
+      // `chimera-challenge:<jobId>:<counterHash>` where counterHash is the
+      // sha256 of the result it computed. The coordinator asks the prover
+      // to deterministically re-execute; the losing side is slashed.
+      const body = (await req.json().catch(() => ({}))) as
+        | { jobId?: string; challenger?: string; counterHash?: string; sig?: string } | null
+      if (!body?.jobId || !body.challenger || !body.counterHash || !body.sig) {
+        return this.json({ error: 'jobId + challenger + counterHash + sig required' }, 400)
+      }
+      const r = await this.state.storage.get(`result:${body.jobId}`) as
+        | { volunteerId?: string; result?: string; resultToken?: string; taskType?: number
+            payload?: string; disputed?: boolean; proof?: { did?: string } } | undefined
+      if (!r) return this.json({ error: 'result not found' }, 404)
+      if (r.disputed) return this.json({ error: 'already challenged' }, 409)
+      if (!this.env.PROVER_URL) return this.json({ error: 'no prover configured — disputes unresolvable' }, 501)
+      const challengerDid = (await this.state.storage.get(`didbind:${body.challenger}`)) as string | undefined
+      if (!challengerDid) return this.json({ error: 'challenger has no DID binding' }, 403)
+      // Challenger must have skin in the game — a zero-rep DID could spam
+      // disputes at no cost while each one triggers a paid re-execution.
+      const challengerRep = (await this.state.storage.get(`rep:${body.challenger}`)) as { points?: number } | undefined
+      if ((challengerRep?.points ?? 0) <= 0) return this.json({ error: 'challenger holds no rep — nothing to slash' }, 403)
+      const msg = `chimera-challenge:${body.jobId}:${body.counterHash}`
+      let ok = false
+      try {
+        if (challengerDid.startsWith('did:key:')) {
+          const sb = decodeSig(body.sig)
+          if (sb) ok = await verifyDidKey(challengerDid, msg, sb)
+        } else {
+          ok = await verifyMessage({ address: challengerDid as Hex, message: msg, signature: body.sig as Hex })
+        }
+      } catch { ok = false }
+      if (!ok) {
+        await this.audit('challenge.bad-sig', { jobId: body.jobId, challenger: body.challenger })
+        return this.json({ error: 'invalid challenge signature' }, 403)
+      }
+      // Re-prove: the prover re-executes and its signed verdict resolves.
+      const ref = (await this.requestExecProof(
+        body.jobId, r.taskType ?? 0, r.payload ?? '', r.result ?? '',
+        r.proof?.did ?? null, r.resultToken,
+      ).catch(() => null)) as { reproduced?: boolean; outputHash?: string; recomputedOutputHash?: string } | null
+      const recomputedHash = ref?.recomputedOutputHash ?? ref?.outputHash
+      if (!ref || (typeof recomputedHash !== 'string' && ref.reproduced === undefined)) {
+        return this.json({ error: 'prover could not adjudicate this task type' }, 422)
+      }
+      // Verdict: byte-exact match when deterministic (checked locally), else
+      // the prover's field-level verdict with the diff recorded as evidence.
+      const resultStands =
+        recomputedHash === await this.sha256Hex(r.result ?? '') || ref.reproduced === true
+      const loser = resultStands ? body.challenger : (r.volunteerId ?? '')
+      // Slash: rep penalty (floor 0) — the dishonest side pays.
+      if (loser) {
+        const rep = (await this.state.storage.get(`rep:${loser}`)) as { points?: number; jobs?: number } | undefined
+        const penalty = Number(this.env.CHALLENGE_SLASH || '10')
+        await this.state.storage.put(`rep:${loser}`, {
+          ...(rep ?? {}), points: Math.max(0, (rep?.points ?? 0) - penalty),
+        })
+      }
+      await this.state.storage.put(`result:${body.jobId}`, {
+        ...(r as object), disputed: true,
+        challenge: { challenger: body.challenger, counterHash: body.counterHash, resolved: resultStands ? 'result-stands' : 'challenger-wins', proof: ref },
+      })
+      await this.audit('challenge.resolved', {
+        jobId: body.jobId, challenger: body.challenger,
+        originalBy: r.volunteerId, outcome: resultStands ? 'result-stands' : 'challenger-wins', slashed: loser,
+      })
+      return this.json({ ok: true, outcome: resultStands ? 'result-stands' : 'challenger-wins', slashed: loser, proof: ref })
     }
     return this.json({ error: 'not found' }, 404)
   }
@@ -1234,6 +1372,7 @@ export class CoordinatorDO implements DurableObject {
     }
     await this.state.storage.put(`result:${jobId}`, {
       volunteerId, result, at: Date.now(), source: job.source,
+      taskType: job.taskType, payload: job.payload,
       sandbox: 'quoted', estWh, group: job.group, resultToken: job.resultToken,
       ...(proof ? { proof } : {}),
     })
@@ -1245,14 +1384,17 @@ export class CoordinatorDO implements DurableObject {
     // a prover the signature proof above is attribution, not correctness —
     // this hook is where real proofs attach.
     if (this.env.PROVER_URL) {
-      void this.requestExecProof(jobId, job.taskType, job.payload, result, nodeDid ?? null)
-        .then((ref) => {
-          if (!ref) return
-          void this.state.storage.get(`result:${jobId}`).then((r) => {
-            if (r) void this.state.storage.put(`result:${jobId}`, { ...(r as object), execProof: ref })
+      // waitUntil — the DO isolate must stay alive until the prover returns
+      // and the execProof lands on the result record.
+      this.state.waitUntil(
+        this.requestExecProof(jobId, job.taskType, job.payload, result, nodeDid ?? null, job.resultToken)
+          .then(async (ref) => {
+            if (!ref) return
+            const r = await this.state.storage.get(`result:${jobId}`)
+            if (r) await this.state.storage.put(`result:${jobId}`, { ...(r as object), execProof: ref })
           })
-        })
-        .catch(() => void this.audit('prover.error', { jobId }))
+          .catch(() => this.audit('prover.error', { jobId }))
+      )
     }
 
     // Spot-check adjudication — a replica job (verifyOf set) is compared to
@@ -1286,16 +1428,24 @@ export class CoordinatorDO implements DurableObject {
           .then((out) => { if (!(out instanceof Response)) void this.dispatch(out.jobId) })
       }
     }
-    // Content-hash dedup — identical results across *different* jobs (per
-    // taskType) skip credit AND rep entirely: farming repeats must not accrue
-    // either. The result still lands on result:<jobId> so the submitter's
-    // await resolves normally. seen: keys are per-taskType so two lanes can
-    // each legitimately produce the same output.
-    const seenKey = `seen:${job.taskType}:${await this.sha256Hex(result)}`
-    if (await this.state.storage.get(seenKey)) {
+    // Content-hash dedup — anti-farming, NOT anti-consensus. Flagged only
+    // when the SAME volunteer returns an identical result for a DIFFERENT
+    // input: that's a canned replay. Identical output for the same input is
+    // expected from deterministic execution (and two distinct volunteers
+    // agreeing is what jury redundancy wants), so neither is penalized.
+    // The result still lands on result:<jobId> so the submitter's await
+    // resolves normally either way.
+    const resHash = await this.sha256Hex(result)
+    const seenKey = `seen:${volunteerId}:${job.taskType}:${resHash}`
+    const seen = (await this.state.storage.get(seenKey)) as
+      | { jobId: string; inputHash: string; at: number }
+      | undefined
+    if (seen && seen.inputHash !== job.payload) {
       await this.audit('result.duplicate', { jobId, volunteerId })
     } else {
-      await this.state.storage.put(seenKey, { jobId, volunteerId, at: Date.now() })
+      await this.state.storage.put(seenKey, {
+        jobId, inputHash: String(job.payload ?? ''), at: Date.now(),
+      })
       await this.credit(
         volunteerId, job.amountWei, job.site,
         this.registry.get(volunteerId)?.site === job.site,
@@ -1746,28 +1896,22 @@ export class CoordinatorDO implements DurableObject {
    *  the coordinator wallet. Returns the tx hash or null (reverts on replayed
    *  nonce / expired window — the signature was already verified upstream). */
   private async settleX402Direct(xpay: string): Promise<string | null> {
+    const decoded = decodeEip3009Payment(xpay)
+    if (!decoded) return null
+    const { auth, v, r, s } = decoded
+    const { wallet } = makeClients(this.env, this.rpcIdx)
+    if (!wallet) return null
     try {
-      const p = JSON.parse(atob(xpay)) as {
-        payload?: { signature?: string; authorization?: {
-          from: string; to: string; value: string; validAfter: string; validBefore: string; nonce: string } }
-      }
-      const auth = p.payload?.authorization
-      const sig = p.payload?.signature
-      if (!auth || !sig) return null
-      const { wallet } = makeClients(this.env, this.rpcIdx)
-      if (!wallet) return null
-      const { r, s, v } = hexToSignature(sig as Hex)
-      const tx = await wallet.writeContract({
+      return await wallet.writeContract({
         address: (this.env.X402_USDC || USDC_BASE) as Hex,
         abi: USDC_EIP3009_ABI,
         functionName: 'transferWithAuthorization',
         args: [
           auth.from as Hex, auth.to as Hex, BigInt(auth.value),
           BigInt(auth.validAfter), BigInt(auth.validBefore), auth.nonce as Hex,
-          Number(v), r, s,
+          v, r, s,
         ],
       })
-      return tx
     } catch {
       return null
     }
@@ -2191,6 +2335,228 @@ export class CoordinatorDO implements DurableObject {
     if (lane) await apply(`rep:lane:${lane.slice(0, 32)}:${id}`)
   }
 
+  // ── Federated committee helpers ──
+
+  /** Peer replica base URLs — operators of federated deployments each set
+   *  COMMITTEE_PEERS to the other members' coordinator URLs. Membership is
+   *  out-of-band (like a Tendermint validator set); FEDERATION_TOKEN is the
+   *  shared peer secret for /committee/replicate + /committee/ballot. */
+  private committeePeers(): string[] {
+    return (this.env.COMMITTEE_PEERS || '')
+      .split(',').map((s) => s.trim().replace(/\/$/, '')).filter(Boolean)
+  }
+
+  /** Best-effort fan-out to peer replicas — runs after the response. */
+  private gossipPeers(path: string, body: Record<string, unknown>) {
+    const peers = this.committeePeers()
+    if (!peers.length || !this.env.FEDERATION_TOKEN) return
+    const fetches = peers.map((p) =>
+      fetch(`${p}${path}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${this.env.FEDERATION_TOKEN}` },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(10_000),
+      }).catch((e) => console.error(`[committee] gossip to ${p} failed:`, e))
+    )
+    this.state.waitUntil(Promise.all(fetches))
+  }
+
+  /** Committee roster snapshot — top COMMITTEE_SIZE DID-bound volunteers
+   *  by rep weight (bounded committee, like a Tendermint validator set;
+   *  ghost rep can't inflate the quorum). Frozen into the proposal so every
+   *  replica weights ballots identically. */
+  private async committeeRoster(): Promise<Record<string, { did: string; weight: number }>> {
+    const size = Math.max(1, Number(this.env.COMMITTEE_SIZE || '21'))
+    const binds = await this.state.storage.list({ prefix: 'didbind:', limit: 5000 })
+    const candidates: { voter: string; did: string; weight: number }[] = []
+    for (const [k, v] of binds) {
+      const voter = k.slice('didbind:'.length)
+      const rep = (await this.state.storage.get(`rep:${voter}`)) as { points?: number } | undefined
+      const weight = rep?.points ?? 0
+      if (weight > 0 && typeof v === 'string') candidates.push({ voter, did: v, weight })
+    }
+    candidates.sort((a, b) => b.weight - a.weight)
+    const roster: Record<string, { did: string; weight: number }> = {}
+    for (const c of candidates.slice(0, size)) roster[c.voter] = { did: c.did, weight: c.weight }
+    return roster
+  }
+
+  /** Verify one signed ballot against the motion's roster (or the live
+   *  rep/didbind tables for legacy roster-less motions). */
+  private async verifyBallot(
+    id: string, m: CommitteeMotion, b: SignedBallot,
+  ): Promise<{ ok: boolean; weight: number; did?: string; status?: number; error?: string }> {
+    let weight: number, voterDid: string | undefined
+    if (m.roster) {
+      const entry = m.roster[b.voter]
+      if (!entry) return { ok: false, weight: 0, status: 403, error: 'voter not in committee roster' }
+      weight = entry.weight; voterDid = entry.did
+    } else {
+      const rep = (await this.state.storage.get(`rep:${b.voter}`)) as { points?: number } | undefined
+      weight = rep?.points ?? 0
+      if (weight <= 0) return { ok: false, weight: 0, status: 403, error: 'voter holds no rep' }
+      voterDid = (await this.state.storage.get(`didbind:${b.voter}`)) as string | undefined
+      if (!voterDid) return { ok: false, weight: 0, status: 403, error: 'voter has no DID binding' }
+    }
+    const msg = `chimera-vote:${id}:${b.phase}:${b.approve ? 'yes' : 'no'}`
+    let ok = false
+    try {
+      if (voterDid.startsWith('did:key:')) {
+        const sigBytes = decodeSig(b.sig)
+        if (sigBytes) ok = await verifyDidKey(voterDid, msg, sigBytes)
+      } else {
+        ok = await verifyMessage({ address: voterDid as Hex, message: msg, signature: b.sig as Hex })
+      }
+    } catch { ok = false }
+    if (!ok) return { ok: false, weight, did: voterDid, status: 403, error: 'invalid ballot signature' }
+    return { ok: true, weight, did: voterDid }
+  }
+
+  /** Recount the current phase's tally box into m.yes/m.no — used after an
+   *  equivocation purge, which removes weight mid-flight. */
+  private recountMotion(m: CommitteeMotion) {
+    const box = m.phase === 'precommit' ? m.precommits : m.prevotes
+    let yes = 0, no = 0
+    for (const w of Object.values(box)) { if (w > 0) yes += w; else no -= w }
+    m.yes = yes; m.no = no
+  }
+
+  /** Mark a voter equivocated — Byzantine evidence (two conflicting signed
+   *  ballots for the same motion+phase) is stored for export, the voter's
+   *  ballot is purged from both phase boxes, and pending entries dropped. */
+  private markEquivocator(m: CommitteeMotion, voter: string, a: SignedBallot, b: SignedBallot) {
+    m.equivocators ??= {}
+    if (!m.equivocators[voter]) m.equivocators[voter] = { a, b }
+    delete m.prevotes[voter]; delete m.precommits[voter]
+    delete m.ballots.prevote[voter]; delete m.ballots.precommit[voter]
+    for (const k of Object.keys(m.pending)) if (k.endsWith(`:${voter}`)) delete m.pending[k]
+  }
+
+  /** Shared ballot path for /committee/vote (gossip=true) and
+   *  /committee/ballot (gossip=false). Verifies the signature, detects
+   *  equivocation, buffers future-phase ballots, advances phases on quorum,
+   *  drains buffered ballots, and gossips accepted ballots to peers. */
+  private async tallyBallot(
+    id: string, ballot: SignedBallot, gossip: boolean,
+  ): Promise<{ body: Record<string, unknown>; status: number }> {
+    const m = (await this.state.storage.get(`committee:${id}`)) as CommitteeMotion | undefined
+    if (!m) {
+      if (!gossip) {
+        // Ballot arrived before the proposal — buffer it (cap 200) for the
+        // replicate handler to drain.
+        const key = `ballotbuf:${id}`
+        const buf = ((await this.state.storage.get(key)) as SignedBallot[] | undefined) ?? []
+        if (buf.length < 200) { buf.push(ballot); await this.state.storage.put(key, buf) }
+      }
+      return { body: { error: 'motion not found/closed' }, status: 404 }
+    }
+    if (m.closed) {
+      // Decisions are final — the QC stands. But a conflicting signed
+      // ballot arriving late is still slashable equivocation evidence.
+      m.ballots ??= { prevote: {}, precommit: {} }
+      const prior = m.ballots[ballot.phase]?.[ballot.voter]
+      if (prior && prior.approve !== ballot.approve) {
+        const v = await this.verifyBallot(id, m, ballot)
+        if (v.ok) {
+          this.markEquivocator(m, ballot.voter, prior, ballot)
+          await this.state.storage.put(`committee:${id}`, m)
+          await this.audit('committee.equivocation', { motion: id, voter: ballot.voter, phase: ballot.phase, postCommit: true })
+          if (gossip) this.gossipPeers('/committee/ballot', { id, ...ballot })
+          return { body: { error: 'equivocation detected — evidence recorded' }, status: 409 }
+        }
+      }
+      return { body: { error: 'motion not found/closed' }, status: 404 }
+    }
+    m.phase ??= 'prevote'
+    m.prevotes ??= m.votes ?? {}; m.precommits ??= {}
+    m.ballots ??= { prevote: {}, precommit: {} }; m.pending ??= {}
+    const order: Record<string, number> = { prevote: 0, precommit: 1, committed: 2, failed: 2 }
+    // Signature first — a *validly signed* conflicting ballot is equivocation
+    // evidence regardless of which phase the motion is in now. Checking
+    // stale-phase before the sig check would let a Byzantine voter's second
+    // ballot slip through unrecorded once the phase moved on.
+    const v = await this.verifyBallot(id, m, ballot)
+    if (!v.ok) {
+      await this.audit('committee.bad-sig', { motion: id, voter: ballot.voter, phase: ballot.phase })
+      return { body: { error: v.error }, status: v.status ?? 403 }
+    }
+    // Gossip every signature-valid ballot on receipt — INCLUDING ones this
+    // replica rejects locally (stale-phase, equivocating). The ballots are
+    // the evidence; a replica that detects an equivocation must still forward
+    // the conflicting ballot so EVERY peer can convict. Gossip-ingress
+    // ballots (gossip=false) aren't re-forwarded — bounded fan-out.
+    if (gossip) this.gossipPeers('/committee/ballot', { id, ...ballot })
+    const priorSamePhase = m.ballots[ballot.phase]?.[ballot.voter]
+    if (priorSamePhase && priorSamePhase.approve !== ballot.approve) {
+      this.markEquivocator(m, ballot.voter, priorSamePhase, ballot)
+      this.recountMotion(m)
+      await this.state.storage.put(`committee:${id}`, m)
+      await this.audit('committee.equivocation', { motion: id, voter: ballot.voter, phase: ballot.phase })
+      return { body: { error: 'equivocation detected — excluded' }, status: 409 }
+    }
+    if (m.equivocators?.[ballot.voter]) {
+      return { body: { error: 'voter equivocated — excluded' }, status: 409 }
+    }
+    if (order[ballot.phase] < order[m.phase]) {
+      return { body: { error: `motion is past ${ballot.phase}` }, status: 409 }
+    }
+    if (priorSamePhase) {
+      return { body: { error: 'already voted this phase' }, status: 409 }
+    }
+    if (order[ballot.phase] > order[m.phase]) {
+      // Future phase — buffer it (Tendermint-style). A conflicting ballot
+      // already pending for the same voter+phase is equivocation evidence.
+      const key = `${ballot.phase}:${ballot.voter}`
+      const prior = m.pending[key]
+      if (prior && prior.approve !== ballot.approve) {
+        this.markEquivocator(m, ballot.voter, prior, ballot)
+        this.recountMotion(m)
+        await this.state.storage.put(`committee:${id}`, m)
+        await this.audit('committee.equivocation', { motion: id, voter: ballot.voter, phase: ballot.phase })
+        return { body: { error: 'equivocation detected — excluded' }, status: 409 }
+      }
+      m.pending[key] = ballot
+      await this.state.storage.put(`committee:${id}`, m)
+      return { body: { ok: true, buffered: true, phase: m.phase }, status: 202 }
+    }
+    m.ballots[ballot.phase][ballot.voter] = ballot
+    const box = ballot.phase === 'prevote' ? m.prevotes : m.precommits
+    box[ballot.voter] = ballot.approve ? v.weight : -v.weight
+    // Tally + advance; draining buffered ballots can cascade phases.
+    const quorum = m.quorum ?? Number(this.env.JURY_QUORUM || '3')
+    let phaseYes = 0, phaseNo = 0, progressed = true
+    while (progressed) {
+      progressed = false
+      const cur = m.phase === 'prevote' ? m.prevotes : m.phase === 'precommit' ? m.precommits : null
+      if (!cur) break
+      phaseYes = 0; phaseNo = 0
+      for (const w of Object.values(cur)) { if (w > 0) phaseYes += w; else phaseNo -= w }
+      if (phaseNo >= quorum) { m.phase = 'failed'; m.closed = true; break }
+      if (m.phase === 'prevote' && phaseYes >= quorum && phaseYes > 2 * phaseNo) {
+        m.phase = 'precommit'; progressed = true
+      } else if (m.phase === 'precommit' && phaseYes >= quorum) {
+        m.phase = 'committed'; m.closed = true; break
+      }
+      if (progressed) {
+        // Drain ballots buffered for the phase we just entered.
+        for (const [k, pb] of Object.entries(m.pending)) {
+          if (pb.phase !== m.phase) continue
+          delete m.pending[k]
+          if (m.equivocators?.[pb.voter]) continue
+          const pv = await this.verifyBallot(id, m, pb)
+          if (!pv.ok) continue
+          m.ballots[pb.phase][pb.voter] = pb
+          const pbBox = pb.phase === 'prevote' ? m.prevotes : m.precommits
+          pbBox[pb.voter] = pb.approve ? pv.weight : -pv.weight
+        }
+      }
+    }
+    m.yes = phaseYes; m.no = phaseNo
+    await this.state.storage.put(`committee:${id}`, m)
+    await this.audit('committee.vote', { motion: id, voter: ballot.voter, weight: v.weight, approve: ballot.approve, phase: ballot.phase })
+    return { body: { ok: true, phase: m.phase, yes: phaseYes, no: phaseNo, closed: !!m.closed }, status: 200 }
+  }
+
   /** Tamper-evident audit chain — each entry carries the previous entry's
    *  hash, so a forged gap breaks the chain. Storage is append-only;
    *  `audit:last` holds the head. Exported via GET /audit (admin). */
@@ -2210,15 +2576,14 @@ export class CoordinatorDO implements DurableObject {
     }
   }
 
-  /** Cloudflare Turnstile siteverify — proves the submitter solved a
-   *  challenge, raising the cost of bulk anonymous /jobs spam. */
-  /** Execution-prover adapter — POSTs the job's I/O hashes to PROVER_URL
-   *  (opML/zkVM-shaped: {jobId, taskType, inputHash, outputHash, nodeDid});
-   *  returns the prover's reference (proof id / tx / uri) or null on
-   *  failure. Payloads are hashed, never sent raw — the prover gets the
-   *  claim, not the content. */
+  /** Execution-prover adapter — POSTs the job's I/O hashes to PROVER_URL.
+   *  Includes `jobUrl`: a resultToken-gated path the prover GETs to fetch
+   *  {taskType, payload, result} for deterministic re-execution — hashes
+   *  alone are unprovable claims. The token scopes read to this one job;
+   *  the prover still only sees jobs it's asked to prove. */
   private async requestExecProof(
-    jobId: string, taskType: number, payload: string, result: string, nodeDid: string | null,
+    jobId: string, taskType: number, payload: string, result: string,
+    nodeDid: string | null, resultToken?: string,
   ): Promise<unknown | null> {
     const res = await fetch(`${this.env.PROVER_URL!.replace(/\/$/, '')}/prove`, {
       method: 'POST',
@@ -2228,8 +2593,11 @@ export class CoordinatorDO implements DurableObject {
         inputHash: await this.sha256Hex(payload),
         outputHash: await this.sha256Hex(result),
         nodeDid,
+        ...(resultToken ? { jobUrl: `/results/${jobId}?token=${resultToken}` } : {}),
       }),
-      signal: AbortSignal.timeout(30_000),
+      // Re-execution can take a while — first-run model downloads for
+      // inference jobs exceed 30s. Generous bound; this runs off-request.
+      signal: AbortSignal.timeout(180_000),
     })
     if (!res.ok) return null
     return res.json().catch(() => ({ accepted: true }))
