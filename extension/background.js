@@ -22,36 +22,71 @@ let ws = null, heartbeat = null, volunteerId = null;
 let idKey = null, idDid = null;
 let transformers = null;
 
-// Infer lane — AGENT_INFER (200) is claimed only when a bundled transformers.js
-// build resolves. MV3 CSP forbids remote code, so `vendor/transformers.js` must
-// be produced at pack time (esbuild bundle of @huggingface/transformers). If
-// the artifact isn't in the package the lane simply isn't claimed — the node
-// still serves fetch/pin/canary.
+// Infer lane — AGENT_INFER (200) prefers the wllama lane (llama.cpp →
+// WASM/WebGPU in a cross-origin-isolated offscreen document; GGUF weights) and
+// falls back to vendored transformers.js. MV3 CSP forbids remote code, so both
+// engines must be produced at pack time by build.mjs → vendor/*. If neither
+// artifact is in the package the lane isn't claimed — the node still serves
+// fetch/pin/canary.
+const WLLAMA_MODEL =
+  'https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf';
+
 async function loadInfer() {
   if (transformers) return true;
   try {
     const m = await import('./vendor/transformers.js');
     transformers = m.pipeline ? m : m.default;
-    if (!transformers?.pipeline) return false;
-    TASK_TYPES.push(200);
-    return true;
+    return !!transformers?.pipeline;
   } catch { return false; }
+}
+
+let wllamaAssets = null;
+async function wllamaAvailable() {
+  wllamaAssets ??= typeof chrome.offscreen === 'object'
+    && await fetch(chrome.runtime.getURL('vendor/wllama-page.js')).then((r) => r.ok).catch(() => false);
+  return wllamaAssets;
+}
+
+async function claimInfer() {
+  if (!TASK_TYPES.includes(200) && ((await wllamaAvailable()) || (await loadInfer())))
+    TASK_TYPES.push(200);
+}
+
+async function wllamaInfer(prompt, maxTokens) {
+  if (!(await wllamaAvailable())) throw new Error('wllama lane unavailable');
+  if (!(await chrome.offscreen.hasDocument?.().catch(() => false))) {
+    await chrome.offscreen.createDocument({
+      url: 'wllama-page.html',
+      reasons: ['WORKERS'],
+      justification: 'Local LLM inference (wllama / llama.cpp in WASM) for pool jobs',
+    });
+  }
+  const { wllamaModel } = await chrome.storage.local.get('wllamaModel');
+  const res = await chrome.runtime.sendMessage({
+    cmd: 'wllama-infer', prompt, maxTokens,
+    modelUrl: wllamaModel || WLLAMA_MODEL,
+  });
+  if (!res?.ok) throw new Error(res?.error || 'wllama empty response');
+  return res.text;
 }
 
 let inferPipe = null;
 async function runInfer(payload) {
+  const { prompt, model, maxTokens } = JSON.parse(payload);
+  try {
+    return { text: await wllamaInfer(prompt, maxTokens), engine: 'wllama' };
+  } catch { /* wllama page/engine unavailable → ONNX lane */ }
   if (!(await loadInfer())) throw new Error('infer lane unavailable');
-  const { prompt, model } = JSON.parse(payload);
   // Small instruct model; weights fetch+cache via transformers.js Cache API.
   inferPipe ??= await transformers.pipeline(
     'text-generation',
     model || 'HuggingFaceTB/SmolLM2-135M-Instruct',
     { dtype: 'q4' },
   );
-  const out = await inferPipe(prompt, { max_new_tokens: 256, do_sample: false });
+  const out = await inferPipe(prompt, { max_new_tokens: maxTokens || 256, do_sample: false });
   const text = out?.[0]?.generated_text ?? '';
   if (!text) throw new Error('empty generation');
-  return text.slice(prompt.length).trim() || text;
+  return { text: text.slice(prompt.length).trim() || text, engine: 'transformers.js' };
 }
 
 async function ensureId() {
@@ -142,14 +177,14 @@ async function pin(payload) {
 
 async function onJob(msg) {
   try {
-    let result;
+    let result, engine;
     if (msg.taskType === 206) result = JSON.parse(msg.requestHash).nonce;
     else if (msg.taskType === 205) result = await webFetch(msg.requestHash, msg.jobId);
     else if (msg.taskType === 1) result = await pin(msg.requestHash);
-    else if (msg.taskType === 200) result = await runInfer(msg.requestHash);
+    else if (msg.taskType === 200) ({ text: result, engine } = await runInfer(msg.requestHash));
     else throw new Error(`unsupported taskType ${msg.taskType}`);
     const resultSig = await signMsg(`chimera-result:${msg.jobId}:${await sha256hex(new TextEncoder().encode(result))}`);
-    ws.send(JSON.stringify({ type: 'JOB_RESULT', jobId: msg.jobId, result, ...(resultSig ? { resultSig } : {}) }));
+    ws.send(JSON.stringify({ type: 'JOB_RESULT', jobId: msg.jobId, result, ...(resultSig ? { resultSig } : {}), ...(engine ? { engine } : {}) }));
     const { jobs = 0 } = await chrome.storage.local.get('jobs');
     await chrome.storage.local.set({ jobs: jobs + 1 });
   } catch (e) {
@@ -162,7 +197,7 @@ async function connect() {
   if (!consent) return;
   const id = await ensureId();
   await ensureIdentity();
-  await loadInfer(); // claims taskType 200 iff vendored transformers.js exists
+  await claimInfer(); // claims taskType 200 iff a vendored infer engine exists
   ws = new WebSocket(`${COORD}?token=${encodeURIComponent(TOKEN)}`);
   ws.onopen = async () => {
     const sig = await signMsg(`chimera-bind:${id}`);
