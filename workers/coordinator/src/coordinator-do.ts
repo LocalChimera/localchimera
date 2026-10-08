@@ -177,6 +177,9 @@ interface JobEnvelope {
   status?: string
   result?: string
   resultSig?: string
+  /** Inference engine the node claims it ran ('ollama'|'onnx'|…) — stored
+   *  on the result record; the prover replays on the same engine. */
+  engine?: string
   reason?: string
 }
 
@@ -928,15 +931,20 @@ export class CoordinatorDO implements DurableObject {
         break
       }
       case 'HEARTBEAT': {
+        // Update the REGISTRY entry — metaFor returns a fresh attachment
+        // copy, so mutating it alone leaves the registry's lastHeartbeat
+        // stale and the node drops out of dispatch eligibility after 60s.
         const v = this.metaFor(ws)
-        if (v) {
-          v.lastHeartbeat = Date.now()
+        const r = v ? this.registry.get(v.id) : undefined
+        const target = r ?? v
+        if (target) {
+          target.lastHeartbeat = Date.now()
           // env.status is ignored — upstream heartbeats always claim 'idle',
           // which would clobber 'busy' mid-job. The DO owns busy/idle via the
           // assignment lifecycle.
-          if (env.taskTypes) v.taskTypes = stripSwarmClaims(normalizeTaskTypes(env.taskTypes), v.durable)
-          if (env.capabilities) v.capabilities = env.capabilities
-          ws.serializeAttachment(v)
+          if (env.taskTypes) target.taskTypes = stripSwarmClaims(normalizeTaskTypes(env.taskTypes), target.durable)
+          if (env.capabilities) target.capabilities = env.capabilities
+          ws.serializeAttachment(target)
         }
         break
       }
@@ -945,7 +953,8 @@ export class CoordinatorDO implements DurableObject {
         if (env.jobId && typeof env.result === 'string' && meta) {
           void this.onJobResult(
             env.jobId, meta.id, env.result.slice(0, MAX_RESULT_BYTES),
-            typeof env.resultSig === 'string' ? env.resultSig : undefined)
+            typeof env.resultSig === 'string' ? env.resultSig : undefined,
+            typeof env.engine === 'string' ? env.engine.slice(0, 32) : undefined)
         }
         break
       }
@@ -1210,7 +1219,7 @@ export class CoordinatorDO implements DurableObject {
     await this.state.storage.delete(`assigned:${jobId}`)
   }
 
-  private async onJobResult(jobId: string, volunteerId: string, result: string, resultSig?: string) {
+  private async onJobResult(jobId: string, volunteerId: string, result: string, resultSig?: string, engine?: string) {
     const assignment = (await this.state.storage.get(`assigned:${jobId}`)) as
       | { volunteerId: string; at: number }
       | undefined
@@ -1374,6 +1383,9 @@ export class CoordinatorDO implements DurableObject {
       volunteerId, result, at: Date.now(), source: job.source,
       taskType: job.taskType, payload: job.payload,
       sandbox: 'quoted', estWh, group: job.group, resultToken: job.resultToken,
+      // Execution engine claimed by the node ('ollama'|'onnx'|…) — the
+      // prover replays on the same engine; a mismatch proves the node lied.
+      ...(engine ? { engine } : {}),
       ...(proof ? { proof } : {}),
     })
 
@@ -1387,7 +1399,7 @@ export class CoordinatorDO implements DurableObject {
       // waitUntil — the DO isolate must stay alive until the prover returns
       // and the execProof lands on the result record.
       this.state.waitUntil(
-        this.requestExecProof(jobId, job.taskType, job.payload, result, nodeDid ?? null, job.resultToken)
+        this.requestExecProof(jobId, job.taskType, job.payload, result, nodeDid ?? null, job.resultToken, engine)
           .then(async (ref) => {
             if (!ref) return
             const r = await this.state.storage.get(`result:${jobId}`)
@@ -2583,7 +2595,7 @@ export class CoordinatorDO implements DurableObject {
    *  the prover still only sees jobs it's asked to prove. */
   private async requestExecProof(
     jobId: string, taskType: number, payload: string, result: string,
-    nodeDid: string | null, resultToken?: string,
+    nodeDid: string | null, resultToken?: string, engine?: string,
   ): Promise<unknown | null> {
     const res = await fetch(`${this.env.PROVER_URL!.replace(/\/$/, '')}/prove`, {
       method: 'POST',
@@ -2593,6 +2605,9 @@ export class CoordinatorDO implements DurableObject {
         inputHash: await this.sha256Hex(payload),
         outputHash: await this.sha256Hex(result),
         nodeDid,
+        // The engine the node claims it ran — the prover replays on the
+        // same engine (cross-engine outputs legitimately differ).
+        ...(engine ? { engine } : {}),
         ...(resultToken ? { jobUrl: `/results/${jobId}?token=${resultToken}` } : {}),
       }),
       // Re-execution can take a while — first-run model downloads for

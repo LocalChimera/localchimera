@@ -19,10 +19,14 @@
  * are accepted with a warning.
  *
  * Task handlers:
- *   300 SWARM_INFER  — text-generation via @huggingface/transformers when
- *                      installed (dynamic import; honest JOB_REJECTED when
- *                      absent). Payload: {prompt, model?, maxTokens?} or a
- *                      bare prompt string.
+ *   300 SWARM_INFER  — text-generation. Engine selection is honest and
+ *                      reported on the result: a reachable local Ollama
+ *                      daemon (llama.cpp — ~10x faster warm than the ONNX
+ *                      path) is preferred; @huggingface/transformers is
+ *                      the fallback (dynamic import; honest JOB_REJECTED
+ *                      when neither is available). Payload:
+ *                      {prompt, model?, ollamaModel?, maxTokens?, engine?}
+ *                      or a bare prompt string.
  *   301 BUILD_VERIFY — runs a declared command in a fresh temp dir. No
  *                      shell, argv[0] must be in BUILD_ALLOWLIST, stdout/
  *                      stderr and artifacts are size-capped and sha256'd.
@@ -41,7 +45,11 @@
  *   VOLUNTEER_ID       stable id (default durable-<host>-<pid>)
  *   KEY_FILE           ed25519 PKCS8 PEM path; created if absent
  *   SHARD_CAPACITY     max concurrent jobs (default 4)
- *   TRANSFORMERS_MODEL default HF model for 300 (default SmolLM2-135M-Instruct)
+ *   TRANSFORMERS_MODEL default HF model for 300 (default Qwen2.5-0.5B-Instruct)
+ *   OLLAMA_URL         local Ollama/llama.cpp daemon (default :11434)
+ *   OLLAMA_MODEL       model tag for the ollama engine (default qwen2.5:0.5b)
+ *   INFER_ENGINE       'auto' (default) | 'ollama' | 'onnx' — auto prefers a
+ *                      reachable ollama daemon, else transformers.js
  *   BUILD_ALLOWLIST    comma-sep allowed argv[0] for 301 (default "node,npm")
  *   VERIFY_DISPATCH    "0" to skip dispatch-sig verification (default on)
  *   JOB_TIMEOUT_MS     per-job cap (default 120000)
@@ -61,6 +69,9 @@ const {
   KEY_FILE = join(tmpdir(), `${VOLUNTEER_ID}-ed25519.pk8`),
   SHARD_CAPACITY = '4',
   TRANSFORMERS_MODEL = 'onnx-community/Qwen2.5-0.5B-Instruct',
+  OLLAMA_URL = 'http://localhost:11434',
+  OLLAMA_MODEL = 'qwen2.5:0.5b',
+  INFER_ENGINE = 'auto',               // 'auto' | 'ollama' | 'onnx'
   BUILD_ALLOWLIST = 'node,npm',
   VERIFY_DISPATCH = '1',
   JOB_TIMEOUT_MS = '120000',
@@ -195,14 +206,46 @@ async function fetchWeightsIpfs(cid, expectedSha256) {
   }
 }
 
+// ── Inference engines ──
+// A local Ollama daemon (llama.cpp) is ~10x faster warm than the in-process
+// ONNX path and runs inference off the event loop — the heartbeat never
+// starves under sustained load. It's probed once at startup; the chosen
+// engine is reported on the JOB_RESULT so the deterministic-replay prover
+// can re-execute on the SAME engine (cross-engine outputs legitimately
+// differ — a mismatched engine would false-flag honest results).
+let ollama = null // probed {url, model} | null
+async function probeOllama() {
+  try {
+    const res = await fetch(`${OLLAMA_URL}/api/tags`, { signal: AbortSignal.timeout(3000) })
+    if (!res.ok) return
+    const tags = await res.json()
+    const names = (tags?.models ?? []).map((m) => m.name)
+    const model = names.includes(OLLAMA_MODEL) ? OLLAMA_MODEL
+      : names.find((n) => n.startsWith(`${OLLAMA_MODEL}:`))
+    if (model) { ollama = { url: OLLAMA_URL, model }; console.log(`[node] ollama backend — ${model} @ ${OLLAMA_URL}`) }
+    else console.log(`[node] ollama reachable but '${OLLAMA_MODEL}' not pulled — onnx fallback`)
+  } catch { /* no local daemon — onnx fallback */ }
+}
+async function runInferOllama(spec, prompt) {
+  const model = spec.ollamaModel || spec.model && !spec.model.includes('/') && spec.model || ollama.model
+  const res = await fetch(`${ollama.url}/api/generate`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      model, prompt, stream: false, keep_alive: '5m',
+      options: { num_predict: Math.min(Number(spec.maxTokens) || 256, 1024), temperature: 0 },
+    }),
+    signal: AbortSignal.timeout(parseInt(JOB_TIMEOUT_MS, 10)),
+  })
+  if (!res.ok) throw new Error(`ollama ${res.status}: ${(await res.text()).slice(0, 200)}`)
+  const body = await res.json()
+  if (typeof body.response !== 'string' || !body.response) throw new Error('empty ollama generation')
+  // Match transformers.js output shape: generated_text includes the prompt.
+  return prompt + body.response
+}
+
 let inferPipeline = null
 let inferModel = null
-async function runInfer(payload) {
-  const spec = typeof payload === 'string'
-    ? { prompt: payload }
-    : (typeof payload === 'object' && payload !== null ? payload : {})
-  const prompt = String(spec.prompt ?? spec.input ?? '')
-  if (!prompt) throw new Error('SWARM_INFER payload needs prompt')
+async function runInferOnnx(spec, prompt) {
   const model = spec.model || TRANSFORMERS_MODEL
   let tf
   try {
@@ -239,6 +282,24 @@ async function runInfer(payload) {
   const result = typeof text === 'string' ? text : String(text ?? '')
   if (!result) throw new Error('empty generation')
   return result
+}
+
+/** Engine-picking dispatcher — returns {text, engine}. The engine is
+ *  reported on the JOB_RESULT envelope so the prover replays on the same
+ *  engine; a node claiming the wrong engine produces a replay mismatch,
+ *  which is exactly what verification is for. */
+async function runInfer(payload) {
+  const spec = typeof payload === 'string'
+    ? { prompt: payload }
+    : (typeof payload === 'object' && payload !== null ? payload : {})
+  const prompt = String(spec.prompt ?? spec.input ?? '')
+  if (!prompt) throw new Error('SWARM_INFER payload needs prompt')
+  const engine = spec.engine || INFER_ENGINE
+  if (engine === 'ollama' || (engine === 'auto' && ollama)) {
+    if (!ollama) throw new Error('engine=ollama requested but no daemon reachable')
+    return { text: await runInferOllama(spec, prompt), engine: 'ollama' }
+  }
+  return { text: await runInferOnnx(spec, prompt), engine: 'onnx' }
 }
 
 async function runBuildVerify(payload) {
@@ -328,15 +389,17 @@ async function handleDispatch(env) {
   try {
     let payload = env.requestHash
     try { payload = JSON.parse(env.requestHash) } catch { /* bare string payload */ }
-    let result
-    if (taskType === TASK_SWARM_INFER) result = await runInfer(payload)
-    else if (taskType === TASK_BUILD_VERIFY) result = await runBuildVerify(payload)
+    let result, engine
+    if (taskType === TASK_SWARM_INFER) {
+      const r = await runInfer(payload)
+      result = r.text; engine = r.engine
+    } else if (taskType === TASK_BUILD_VERIFY) result = await runBuildVerify(payload)
     else throw new Error(`unsupported taskType ${taskType}`)
     if (Buffer.byteLength(result) > parseInt(MAX_RESULT_BYTES, 10)) {
       throw new Error('result exceeds MAX_RESULT_BYTES')
     }
     const resultSig = signEd25519(`chimera-result:${jobId}:${sha256Hex(result)}`)
-    send({ type: 'JOB_RESULT', jobId, result, resultSig })
+    send({ type: 'JOB_RESULT', jobId, result, resultSig, ...(engine ? { engine } : {}) })
   } catch (e) {
     send({ type: 'JOB_REJECTED', jobId, reason: String(e?.message || e).slice(0, 256) })
   } finally {
@@ -404,4 +467,5 @@ process.on('SIGINT', shutdown)
 process.on('SIGTERM', shutdown)
 
 await fetchCoordinatorKey()
+await probeOllama()
 connect()

@@ -27,6 +27,8 @@
  *   COORDINATOR_URL     — coordinator base for jobUrl fetches (default :8787)
  *   PROVER_KEY_FILE     — ed25519 pkcs8 PEM for signing proofs (auto-created)
  *   TRANSFORMERS_MODEL  — default model for 300 (same default as the daemon)
+ *   OLLAMA_URL          — local Ollama daemon for 'ollama'-engine replays
+ *   OLLAMA_MODEL        — model tag for the ollama engine
  *   BUILD_ALLOWLIST     — same command allowlist semantics as the daemon
  *   PROVE_TIMEOUT_MS    — re-execution cap (default 120000)
  */
@@ -42,6 +44,8 @@ const {
   COORDINATOR_URL = 'http://localhost:8787',
   PROVER_KEY_FILE = join(tmpdir(), 'chimera-prover-key.pk8'),
   TRANSFORMERS_MODEL = 'onnx-community/Qwen2.5-0.5B-Instruct',
+  OLLAMA_URL = 'http://localhost:11434',
+  OLLAMA_MODEL = 'qwen2.5:0.5b',
   BUILD_ALLOWLIST = 'node,npm,python3,make,git',
   PROVE_TIMEOUT_MS = '120000',
 } = process.env
@@ -138,14 +142,30 @@ async function reexecBuildVerify(payload) {
   }
 }
 
+// Engine-matched inference replay. The result record carries the engine
+// the node claimed ('ollama'|'onnx'); replaying on a different engine would
+// legitimately produce different bytes and false-flag honest results, so
+// the prover honors it. Cross-engine *semantic* equivalence is a separate
+// (unsolved) question — replay is same-engine only.
+async function reexecInferOllama(spec, prompt) {
+  const model = spec?.ollamaModel || (spec?.model && !spec.model.includes('/') ? spec.model : null) || OLLAMA_MODEL
+  const res = await fetch(`${OLLAMA_URL}/api/generate`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      model, prompt, stream: false,
+      options: { num_predict: Math.min(Number(spec?.maxTokens) || 256, 1024), temperature: 0 },
+    }),
+    signal: AbortSignal.timeout(parseInt(PROVE_TIMEOUT_MS, 10)),
+  })
+  if (!res.ok) throw new Error(`ollama ${res.status}: ${(await res.text()).slice(0, 200)}`)
+  const body = await res.json()
+  if (typeof body.response !== 'string' || !body.response) throw new Error('empty ollama generation')
+  // Same shape as the onnx path: generated text includes the prompt.
+  return prompt + body.response
+}
+
 let pipe = null, pipeModel = null
-async function reexecInfer(payload) {
-  let spec = payload
-  if (typeof spec === 'string') {
-    try { spec = JSON.parse(spec) } catch { spec = { prompt: spec } }
-  }
-  const prompt = String(spec?.prompt ?? spec?.input ?? '')
-  if (!prompt) throw new Error('SWARM_INFER payload needs prompt')
+async function reexecInferOnnx(spec, prompt) {
   const model = spec?.model || TRANSFORMERS_MODEL
   const tf = await import('@huggingface/transformers')
   if (!pipe || pipeModel !== model) {
@@ -159,6 +179,18 @@ async function reexecInfer(payload) {
   const text = Array.isArray(out) ? out[0]?.generated_text : out?.generated_text
   if (!text) throw new Error('empty generation')
   return String(text)
+}
+
+async function reexecInfer(payload, engine) {
+  let spec = payload
+  if (typeof spec === 'string') {
+    try { spec = JSON.parse(spec) } catch { spec = { prompt: spec } }
+  }
+  const prompt = String(spec?.prompt ?? spec?.input ?? '')
+  if (!prompt) throw new Error('SWARM_INFER payload needs prompt')
+  const eff = spec?.engine || engine || 'onnx'
+  if (eff === 'ollama') return reexecInferOllama(spec, prompt)
+  return reexecInferOnnx(spec, prompt)
 }
 
 // Field-level comparison — structured results can differ in provably benign
@@ -192,6 +224,7 @@ const server = createServer(async (req, res) => {
   let reqObj
   try { reqObj = JSON.parse(body) } catch { return send(400, { error: 'bad json' }) }
   const { jobId, taskType, inputHash, outputHash, nodeDid, jobUrl } = reqObj ?? {}
+  const reqEngine = typeof reqObj?.engine === 'string' ? reqObj.engine.slice(0, 32) : undefined
   if (!jobId || taskType === undefined) return send(400, { error: 'jobId + taskType required' })
 
   const t0 = Date.now()
@@ -204,9 +237,15 @@ const server = createServer(async (req, res) => {
     if (sha256Hex(String(job.payload ?? '')) !== inputHash) {
       return send(422, { error: 'payload hash mismatch — prover saw different input', inputHash, seen: sha256Hex(String(job.payload ?? '')) })
     }
-    let recomputed
+    let recomputed, usedEngine
     if (taskType === 301) recomputed = await reexecBuildVerify(job.payload)
-    else if (taskType === 300) recomputed = await reexecInfer(job.payload)
+    else if (taskType === 300) {
+      // The stored record's engine claim is authoritative — it IS what the
+      // node declared. Replaying on a different engine would legitimately
+      // produce different bytes and false-flag honest work.
+      usedEngine = job.engine || reqEngine
+      recomputed = await reexecInfer(job.payload, usedEngine)
+    }
     else return send(200, { type: 'deterministic-replay', supported: false, jobId, taskType, note: 'no re-executor for this task type' })
 
     const recomputedHash = sha256Hex(recomputed)
@@ -224,6 +263,7 @@ const server = createServer(async (req, res) => {
       recomputedTail: recomputed.slice(-500),
       originalTail: String(job.result ?? '').slice(-500),
       nodeDid: nodeDid ?? null,
+      ...(usedEngine ? { engine: usedEngine } : {}),
       isolation,
       tookMs: Date.now() - t0,
       proverDid,
