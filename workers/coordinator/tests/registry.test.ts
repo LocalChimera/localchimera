@@ -119,6 +119,21 @@ describe('selectVolunteer preference cascade', () => {
     const plugged = vol({ capabilities: { cpuCores: 8, ramGb: 16, hasWebGPU: true } })
     expect(selectVolunteer([onBattery, plugged], 0, [], NOW)?.id).toBe(plugged.id)
   })
+
+  it('INTERNAL classification only routes to durable+DID-bound nodes', () => {
+    const visitor = vol({ taskTypes: [200] })                                    // browser, no DID
+    const anonDurable = vol({ taskTypes: [200], durable: true })                  // durable, no DID
+    const boundDurable = vol({ taskTypes: [200], durable: true, did: 'did:key:zabc' })
+    const boundVisitor = vol({ taskTypes: [200], did: 'did:key:zabc' })           // DID but not durable
+    expect(selectVolunteer([visitor], 200, [], NOW, undefined, undefined, undefined, 'INTERNAL')).toBeNull()
+    expect(selectVolunteer([anonDurable], 200, [], NOW, undefined, undefined, undefined, 'INTERNAL')).toBeNull()
+    expect(selectVolunteer([boundVisitor], 200, [], NOW, undefined, undefined, undefined, 'INTERNAL')).toBeNull()
+    expect(selectVolunteer([visitor, anonDurable, boundVisitor, boundDurable], 200, [], NOW,
+      undefined, undefined, undefined, 'INTERNAL')?.id).toBe(boundDurable.id)
+    // PUBLIC (and unset) jobs keep the broad pool.
+    expect(selectVolunteer([visitor], 200, [], NOW)?.id).toBe(visitor.id)
+    expect(selectVolunteer([visitor], 200, [], NOW, undefined, undefined, undefined, 'PUBLIC')?.id).toBe(visitor.id)
+  })
 })
 
 describe('validateJobResult', () => {

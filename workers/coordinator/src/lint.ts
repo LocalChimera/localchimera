@@ -88,10 +88,13 @@ export async function lintPayloadDeep(payload: string): Promise<string | null> {
   }
 }
 
-/** PUBLIC is the only classification accepted in Phase 1 — INTERNAL plumbing
- *  lands in P3 with the secrets-broker/redaction path it needs. */
+/** Accepted classifications: PUBLIC (any node) and INTERNAL (payloads that
+ *  may contain non-secret internal data — dispatched only to durable,
+ *  DID-bound nodes; see the eligibleInternal gate in selectVolunteer).
+ *  SECRET is never accepted — sealed material belongs in SEALED_VALUES
+ *  handles, not payloads. */
 export function classificationOk(classification: unknown): boolean {
-  return classification === undefined || classification === 'PUBLIC'
+  return classification === undefined || classification === 'PUBLIC' || classification === 'INTERNAL'
 }
 
 /** Redaction gate — sealed values (from the SEALED_VALUES env map, name →

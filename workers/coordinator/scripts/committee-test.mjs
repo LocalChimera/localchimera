@@ -128,29 +128,52 @@ const prop = await api('/committee/propose', admin({ motion: 'admit project x in
 check('motion proposed', prop.status === 200, JSON.stringify(prop.body).slice(0, 80))
 const motionId = prop.body.id
 
-// 4 honest signed ballots.
+const vote = (v, phase, approve, signer = v) =>
+  api('/committee/vote', { method: 'POST', body: JSON.stringify({
+    id: motionId, voter: v.id, approve, phase,
+    sig: signer.sign(`chimera-vote:${motionId}:${phase}:${approve ? 'yes' : 'no'}`),
+  }) })
+
+// Phase 1 — 4 honest signed PREVOTES (yes). Quorum-3 weight + yes>2·no →
+// motion must advance to precommit.
+let phase = 'prevote'
 for (let i = 0; i < 4; i++) {
-  const v = voters[i]
-  const sig = v.sign(`chimera-vote:${motionId}:yes`)
-  const r = await api('/committee/vote', { method: 'POST', body: JSON.stringify({ id: motionId, voter: v.id, approve: true, sig }) })
-  check(`voter-${i} honest ballot accepted`, r.status === 200 && r.body.ok === true, JSON.stringify(r.body).slice(0, 80))
+  const r = await vote(voters[i], 'prevote', true)
+  check(`voter-${i} prevote accepted`, r.status === 200 && r.body.ok === true, JSON.stringify(r.body).slice(0, 90))
+  phase = r.body.phase ?? phase
 }
+check('motion advanced to precommit', phase === 'precommit', phase)
 
-// Byzantine ballot — voter-4 signs with a *different* key (forgery).
+// Byzantine ballot — voter-4's precommit signed with a *different* key.
 const forged = makeVoter('forged')
-const badSig = forged.sign(`chimera-vote:${motionId}:no`)
-const r5 = await api('/committee/vote', { method: 'POST', body: JSON.stringify({ id: motionId, voter: voters[4].id, approve: false, sig: badSig }) })
-check('voter-4 forged ballot REJECTED', r5.status === 403, JSON.stringify(r5.body).slice(0, 80))
+const r5 = await vote(voters[4], 'precommit', false, forged)
+check('voter-4 forged precommit REJECTED', r5.status === 403, JSON.stringify(r5.body).slice(0, 80))
 
-// Unsigned ballot also rejected.
-const r6 = await api('/committee/vote', { method: 'POST', body: JSON.stringify({ id: motionId, voter: voters[4].id, approve: false }) })
+// Unsigned ballot rejected.
+const r6 = await api('/committee/vote', { method: 'POST', body: JSON.stringify({ id: motionId, voter: voters[4].id, approve: false, phase: 'precommit' }) })
 check('unsigned ballot REJECTED', r6.status === 400 || r6.status === 403)
 
-// Replay of an honest ballot rejected (one vote per voter).
-const v0 = voters[0]
-const replay = await api('/committee/vote', { method: 'POST', body: JSON.stringify({ id: motionId, voter: v0.id, approve: false, sig: v0.sign(`chimera-vote:${motionId}:no`) }) })
-check('replayed ballot REJECTED (409)', replay.status === 409)
+// A late PREVOTE is rejected — the phase has moved on (cross-phase replay).
+const late = await vote(voters[4], 'prevote', false)
+check('late prevote REJECTED (phase moved on)', late.status === 409, JSON.stringify(late.body).slice(0, 80))
 
-console.log(`\n[test] ${pass} passed, ${fail} failed — committee survived 1 Byzantine voter`)
+// Replay of an honest prevote ballot rejected (one vote per voter per phase).
+const replay = await vote(voters[0], 'prevote', true)
+check('replayed prevote REJECTED (409)', replay.status === 409, JSON.stringify(replay.body).slice(0, 80))
+
+// Phase 2 — 4 honest PRECOMMITS (yes). Quorum → committed.
+let committed = false
+for (let i = 0; i < 4; i++) {
+  const r = await vote(voters[i], 'precommit', true)
+  check(`voter-${i} precommit accepted`, r.status === 200 && r.body.ok === true, JSON.stringify(r.body).slice(0, 90))
+  if (r.body.phase === 'committed') committed = true
+}
+check('motion COMMITTED after 2-phase quorum', committed === true)
+
+// Replay of an honest precommit rejected — the motion is closed.
+const replay2 = await vote(voters[0], 'precommit', true)
+check('post-commit ballot REJECTED (motion closed)', replay2.status === 404)
+
+console.log(`\n[test] ${pass} passed, ${fail} failed — 2-phase committee survived 1 Byzantine voter`)
 for (const ws of sockets) { try { ws.send(JSON.stringify({ type: 'EXIT' })); ws.close() } catch {} }
 process.exit(fail ? 1 : 0)

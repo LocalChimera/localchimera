@@ -1,0 +1,13 @@
+{
+  "name": "chimera-extension",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Chimera Compute volunteer-node browser extension (MV3)",
+  "scripts": {
+    "build": "node build.mjs"
+  },
+  "devDependencies": {
+    "@huggingface/transformers": "^3.7.6",
+    "esbuild": "^0.25.0"
+  }
+}

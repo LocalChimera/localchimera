@@ -55,6 +55,13 @@ new_sqlite_classes = ["CoordinatorDO"]
 #   POW_DIFFICULTY         — hashcash leading-zeros required on /jobs (0 = off)
 #   X402_PAYEE             — payee address; enables 402 challenge on unpaid jobs
 #   X402_USDC              — USDC contract (default Base USDC)
+#   X402_FACILITATOR       — facilitator base URL; unset → coordinator broadcasts
+#     the EIP-3009 authorization itself when COORDINATOR_PRIVATE_KEY is funded
+#   PROVER_URL             — opML/zkVM prover adapter endpoint; completed jobs are
+#     POSTed {jobId, taskType, payloadHash, resultHash, nodeDid} for proving
+#   PRIVACYPASS_ISSUER_KEY — base64 SPKI of the trusted RFC 9578 token issuer;
+#     enables Authorization: PrivateToken redemption on anonymous /jobs
+#   PRIVACYPASS_ORIGIN     — origin name bound into token challenges
 #   JURY_QUORUM            — siblings needed before group adjudication (default 3)
 #   ENS_RPC                — mainnet RPC for /.well-known/ens content-hash lookup
 #   PENDING_TTL_MS         — undispatchable-job expiry (default 3600000)

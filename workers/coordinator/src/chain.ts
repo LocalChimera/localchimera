@@ -73,6 +73,22 @@ export function resultHash(resultText: string): Hex {
   return keccak256(toHex(resultText))
 }
 
+/** EIP-3009 settle — the coordinator can broadcast a verified
+ *  TransferWithAuthorization itself when no x402 facilitator is configured.
+ *  USDC enforces nonce single-use on-chain; a replayed auth just reverts. */
+export const USDC_EIP3009_ABI = [
+  {
+    type: 'function', name: 'transferWithAuthorization', stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'from', type: 'address' }, { name: 'to', type: 'address' },
+      { name: 'value', type: 'uint256' }, { name: 'validAfter', type: 'uint256' },
+      { name: 'validBefore', type: 'uint256' }, { name: 'nonce', type: 'bytes32' },
+      { name: 'v', type: 'uint8' }, { name: 'r', type: 'bytes32' }, { name: 's', type: 'bytes32' },
+    ],
+    outputs: [],
+  },
+] as const
+
 /** Sign the dispatch envelope so nodes can verify a job came from this
  *  coordinator (node-side verification is opt-in — the signature is always
  *  attached once COORDINATOR_PRIVATE_KEY is set). */

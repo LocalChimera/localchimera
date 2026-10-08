@@ -71,3 +71,6 @@ forward_txns.json
 qvac/frontend/public/docs/LOCALCHIMERA.md
 qvac/frontend/public/docs/LOCALCHIMERA.html
 qvac/scripts/
+
+# Local wrangler dev state (sqlite DO/KV/D1/R2 emulators)
+**/.wrangler/

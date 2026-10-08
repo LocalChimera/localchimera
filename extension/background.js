@@ -1,17 +1,58 @@
 // Chimera Compute extension — durable-ish volunteer node for MV3.
 // Store-compliant: no remotely-hosted code executes (CSP forbids it), so all
-// job logic is bundled here. Infer lanes are intentionally NOT claimed —
-// bundling transformers.js + OPFS weight shards is the P6 follow-up; this
-// build serves fetch/pin/canary lanes so the extension ships useful.
+// job logic is bundled here. The infer lane (taskType 200) activates iff the
+// build step produced vendor/transformers.js (esbuild bundle of
+// @huggingface/transformers); without it the node serves fetch/pin/canary.
 //
 // Consent: off by default; chrome.storage.local.consent must be true (set by
 // the popup toggle). Wipe = extension uninstall or popup "Forget me".
+//
+// Identity: an ed25519 keypair is generated once into chrome.storage.local
+// and self-encoded as did:key:z… — REGISTER binds it with a signature over
+// chimera-bind:<id>, and every JOB_RESULT carries a proof signature over
+// chimera-result:<jobId>:<sha256(result)> so the node earns verified rep.
+// Ed25519 needs Chrome/Edge ≥137; on older builds the node still registers
+// but results are anonymous (unverified) — degrade, don't break.
 
 const COORD = 'wss://coordinator.widespread.fyi';
 const TOKEN = 'widespread-volunteer';
 const TASK_TYPES = [1, 205, 206]; // STORAGE pin, WEB_FETCH, CANARY
 
 let ws = null, heartbeat = null, volunteerId = null;
+let idKey = null, idDid = null;
+let transformers = null;
+
+// Infer lane — AGENT_INFER (200) is claimed only when a bundled transformers.js
+// build resolves. MV3 CSP forbids remote code, so `vendor/transformers.js` must
+// be produced at pack time (esbuild bundle of @huggingface/transformers). If
+// the artifact isn't in the package the lane simply isn't claimed — the node
+// still serves fetch/pin/canary.
+async function loadInfer() {
+  if (transformers) return true;
+  try {
+    const m = await import('./vendor/transformers.js');
+    transformers = m.pipeline ? m : m.default;
+    if (!transformers?.pipeline) return false;
+    TASK_TYPES.push(200);
+    return true;
+  } catch { return false; }
+}
+
+let inferPipe = null;
+async function runInfer(payload) {
+  if (!(await loadInfer())) throw new Error('infer lane unavailable');
+  const { prompt, model } = JSON.parse(payload);
+  // Small instruct model; weights fetch+cache via transformers.js Cache API.
+  inferPipe ??= await transformers.pipeline(
+    'text-generation',
+    model || 'HuggingFaceTB/SmolLM2-135M-Instruct',
+    { dtype: 'q4' },
+  );
+  const out = await inferPipe(prompt, { max_new_tokens: 256, do_sample: false });
+  const text = out?.[0]?.generated_text ?? '';
+  if (!text) throw new Error('empty generation');
+  return text.slice(prompt.length).trim() || text;
+}
 
 async function ensureId() {
   if (volunteerId) return volunteerId;
@@ -19,6 +60,46 @@ async function ensureId() {
   volunteerId = id || crypto.randomUUID();
   await chrome.storage.local.set({ id: volunteerId });
   return volunteerId;
+}
+
+const B58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+function base58Encode(bytes) {
+  let num = 0n;
+  for (const b of bytes) num = num * 256n + BigInt(b);
+  let enc = '';
+  while (num > 0n) { enc = B58[Number(num % 58n)] + enc; num /= 58n; }
+  for (const b of bytes) { if (b === 0) enc = '1' + enc; else break; }
+  return enc;
+}
+
+async function ensureIdentity() {
+  if (idKey && idDid) return;
+  try {
+    const stored = await chrome.storage.local.get(['idkeyPriv', 'idkeyPub']);
+    if (stored.idkeyPriv && stored.idkeyPub) {
+      idKey = await crypto.subtle.importKey('jwk', stored.idkeyPriv, 'Ed25519', false, ['sign']);
+      const pub = await crypto.subtle.importKey('jwk', stored.idkeyPub, 'Ed25519', false, []);
+      idDid = `did:key:z${base58Encode(new Uint8Array([0xed, 0x01, ...new Uint8Array(await crypto.subtle.exportKey('raw', pub))]))}`;
+      return;
+    }
+    const pair = await crypto.subtle.generateKey('Ed25519', true, ['sign', 'verify']);
+    await chrome.storage.local.set({
+      idkeyPriv: await crypto.subtle.exportKey('jwk', pair.privateKey),
+      idkeyPub: await crypto.subtle.exportKey('jwk', pair.publicKey),
+    });
+    idKey = pair.privateKey;
+    const raw = new Uint8Array(await crypto.subtle.exportKey('raw', pair.publicKey));
+    idDid = `did:key:z${base58Encode(new Uint8Array([0xed, 0x01, ...raw]))}`;
+  } catch {
+    // No Ed25519 in this browser — stay anonymous (unsigned results).
+    idKey = null; idDid = null;
+  }
+}
+
+async function signMsg(msg) {
+  if (!idKey) return null;
+  const sig = await crypto.subtle.sign('Ed25519', idKey, new TextEncoder().encode(msg));
+  return [...new Uint8Array(sig)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
 async function sha256hex(buf) {
@@ -65,8 +146,10 @@ async function onJob(msg) {
     if (msg.taskType === 206) result = JSON.parse(msg.requestHash).nonce;
     else if (msg.taskType === 205) result = await webFetch(msg.requestHash, msg.jobId);
     else if (msg.taskType === 1) result = await pin(msg.requestHash);
+    else if (msg.taskType === 200) result = await runInfer(msg.requestHash);
     else throw new Error(`unsupported taskType ${msg.taskType}`);
-    ws.send(JSON.stringify({ type: 'JOB_RESULT', jobId: msg.jobId, result }));
+    const resultSig = await signMsg(`chimera-result:${msg.jobId}:${await sha256hex(new TextEncoder().encode(result))}`);
+    ws.send(JSON.stringify({ type: 'JOB_RESULT', jobId: msg.jobId, result, ...(resultSig ? { resultSig } : {}) }));
     const { jobs = 0 } = await chrome.storage.local.get('jobs');
     await chrome.storage.local.set({ jobs: jobs + 1 });
   } catch (e) {
@@ -78,10 +161,14 @@ async function connect() {
   const { consent } = await chrome.storage.local.get('consent');
   if (!consent) return;
   const id = await ensureId();
+  await ensureIdentity();
+  await loadInfer(); // claims taskType 200 iff vendored transformers.js exists
   ws = new WebSocket(`${COORD}?token=${encodeURIComponent(TOKEN)}`);
-  ws.onopen = () => {
+  ws.onopen = async () => {
+    const sig = await signMsg(`chimera-bind:${id}`);
     ws.send(JSON.stringify({
       type: 'REGISTER', volunteerId: id, taskTypes: TASK_TYPES,
+      ...(idDid && sig ? { did: idDid, sig } : {}),
       capabilities: { cpuCores: navigator.hardwareConcurrency || 2 },
       durable: true, shardCapacity: 1,
     }));
@@ -101,6 +188,13 @@ async function connect() {
 chrome.alarms.onAlarm.addListener((a) => { if (a.name === 'reconnect') connect(); });
 chrome.storage.onChanged.addListener((ch) => {
   if (ch.consent?.newValue === true) connect();
-  if (ch.consent?.newValue === false) { ws?.close(); }
+  if (ch.consent?.newValue === false) {
+    // Honest exit — release in-flight assignments server-side before closing.
+    try { ws?.send(JSON.stringify({ type: 'EXIT' })); } catch {}
+    ws?.close();
+  }
 });
 chrome.runtime.onInstalled.addListener(connect);
+// MV3 service workers are ephemeral — on suspend there's no reliable hook,
+// but onStartup/heartbeat reconnect keeps the node honest across restarts.
+chrome.runtime.onStartup?.addListener(connect);

@@ -87,7 +87,12 @@ export function selectVolunteer(
   preferSite?: string,
   preferProject?: string,
   difficulty?: number,
+  /** INTERNAL payloads may carry non-secret internal data — dispatch is
+   *  restricted to durable, DID-bound nodes (attributable + persistent,
+   *  so a leak has a responsible party). PUBLIC/undefined → any node. */
+  classification?: string,
 ): VolunteerMeta | null {
+  const internalOnly = classification === 'INTERNAL'
   const eligible = (v: VolunteerMeta) =>
     now - v.lastHeartbeat < 60_000 &&
     v.taskTypes.includes(taskType) &&
@@ -99,6 +104,9 @@ export function selectVolunteer(
     // pipeline stage state. Nothing dispatches there until durable nodes
     // register with `durable: true` + shardCapacity.
     (taskType < 300 || v.durable === true) &&
+    // INTERNAL lane — only nodes that are both persistent (durable) and
+    // identified (DID-bound) may see internal payloads.
+    (!internalOnly || (v.durable === true && typeof v.did === 'string')) &&
     (networks.length === 0 || networks.some((n) => v.networks.includes(n)))
   let candidates = [...volunteers].filter(eligible)
   if (preferProject) {

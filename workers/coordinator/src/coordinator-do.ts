@@ -29,10 +29,11 @@
 import type { VolunteerMeta } from './registry'
 import { normalizeTaskTypes, stripSwarmClaims, selectVolunteer, validateJobResult, PROJECT, CANONICAL } from './registry'
 import { lintPayload, lintPayloadDeep, classificationOk, redactPayload, parseSealed, stripInstructions, leaksSealed } from './lint'
-import { ESCROW_ABI, makeClients, resultHash, signDispatch } from './chain'
-import { verifyMessage, verifyTypedData } from 'viem'
+import { ESCROW_ABI, USDC_EIP3009_ABI, makeClients, resultHash, signDispatch } from './chain'
+import { verifyMessage, verifyTypedData, hexToSignature } from 'viem'
 import type { Hex } from 'viem'
 import { verifyDidKey, decodeSig, contentHashToCid } from './didkey'
+import { hasPrivateToken, verifyPrivateToken } from './privacypass'
 
 /** Base mainnet USDC — the default x402 payment asset. */
 const USDC_BASE = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'
@@ -82,6 +83,12 @@ interface Env {
   /** Cloudflare Turnstile secret — when set, anonymous /jobs submissions
    *  must carry a `cf-turnstile-response` in the body (anti-abuse gate). */
   TURNSTILE_SECRET?: string
+  /** Privacy Pass (RFC 9578) — base64 SPKI of the trusted token issuer.
+   *  When set, `Authorization: PrivateToken token=…` redeems for one
+   *  anonymous /jobs submission (replay-protected via pptoken:<hash>). */
+  PRIVACYPASS_ISSUER_KEY?: string
+  /** Origin name bound into Privacy Pass token challenges. */
+  PRIVACYPASS_ORIGIN?: string
   /** Hashcash-style PoW gate on /jobs — sha256(payload:nonce) needs this many
    *  leading zero hex digits when >0. Set only if submissions get abused. */
   POW_DIFFICULTY?: string
@@ -90,6 +97,14 @@ interface Env {
   X402_PAYEE?: string
   /** USDC contract for x402 verification (default = Base USDC) */
   X402_USDC?: string
+  /** x402 facilitator base URL — when set, verified EIP-3009 authorizations
+   *  are POSTed to <facilitator>/settle for on-chain settlement. Without it
+   *  payments are signature-verified only (a credit promise, not settled). */
+  X402_FACILITATOR?: string
+  /** Execution-prover endpoint (opML/zkVM adapter) — when set, completed
+   *  results are POSTed for proving; the returned proofRef attaches to the
+   *  result record and surfaces in /verify as execProof. */
+  PROVER_URL?: string
   /** Bounded jury quorum — siblings needed before adjudication (default 3) */
   JURY_QUORUM?: string
   /** Optional mainnet RPC for ENS content-hash resolution */
@@ -118,7 +133,7 @@ interface PendingJob {
   consumer?: string
   site?: string            // wp-cloud site tag — prefer that site's own visitors
   project?: string         // project:<slug> pool — prefer that pool's supporters
-  classification?: string  // 'PUBLIC' only until the INTERNAL lane exists (P3)
+  classification?: string  // 'PUBLIC' (default) or 'INTERNAL' (durable+DID-only dispatch)
   difficulty?: number      // >=2 prefers high-capability nodes
   domain?: string          // specialization lane hint
   modelClass?: string      // 'instruct' | 'embedding' | ...
@@ -298,6 +313,30 @@ export class CoordinatorDO implements DurableObject {
       const trust = (await this.state.storage.get(`trust:${id}`)) as number | undefined
       return this.json({ id, ...(rep ?? { points: 0, jobs: 0, referrals: 0 }), trust: trust ?? 0 })
     }
+    if (url.pathname === '/operator' && url.searchParams.get('did')) {
+      // Operator rollup — the human DID is the principal; volunteerIds
+      // (tabs, extensions, daemons) are instruments. This aggregates every
+      // node bound to the DID into one operator-level view: total rep
+      // (performed + provisioned), jobs, and ledger balance. `didbind:` is
+      // persisted at REGISTER so offline nodes still roll up.
+      const did = url.searchParams.get('did')!
+      const binds = await this.state.storage.list({ prefix: 'didbind:', limit: 5000 })
+      const ids = [...binds.entries()].filter(([, v]) => v === did).map(([k]) => k.slice(8))
+      let points = 0, jobs = 0, totalWei = 0n
+      const nodes: { id: string; points: number; jobs: number; online: boolean }[] = []
+      for (const id of ids) {
+        const rep = (await this.state.storage.get(`rep:${id}`)) as
+          | { points?: number; jobs?: number } | undefined
+        const led = (await this.state.storage.get(`ledger:${id}`)) as
+          | { totalWei?: string } | undefined
+        const online = this.registry.has(id)
+        const p = rep?.points ?? 0, j = rep?.jobs ?? 0
+        points += p; jobs += j
+        totalWei += BigInt(led?.totalWei || '0')
+        nodes.push({ id, points: p, jobs: j, online })
+      }
+      return this.json({ did, nodes, totalPoints: points, totalJobs: jobs, totalWei: totalWei.toString() })
+    }
     if (url.pathname === '/drill') {
       // Disaster-recovery drill — recomputes the hash-chained audit log and
       // cross-checks ledger totals against recorded job credits. Admin only.
@@ -359,10 +398,27 @@ export class CoordinatorDO implements DurableObject {
     if (url.pathname === '/jobs' && req.method === 'POST') {
       const auth = await this.jobAuth(req)
       if (!auth.ok) {
-        // Anonymous submission path — only when TURNSTILE_SECRET is set and
-        // the body carries a solved cf-turnstile-response token. Anonymous
-        // jobs land in the global pool under anonymous quotas; they never
-        // touch project budgets because they're unscoped (no project).
+        // Anonymous submission paths — the submitter must present EITHER a
+        // Privacy Pass token (RFC 9578, Authorization: PrivateToken) OR a
+        // solved Turnstile token in the body. Both are anonymous
+        // attestation: Privacy Pass for attester-issued tokens, Turnstile
+        // for browser challenges. Anonymous jobs land in the global pool
+        // under anonymous quotas — never project budgets (unscoped).
+        const ppKey = this.env.PRIVACYPASS_ISSUER_KEY
+        const authz = req.headers.get('authorization')
+        if (hasPrivateToken(authz)) {
+          if (!ppKey) return this.json({ error: 'privacy pass not configured' }, 401)
+          const tokenHash = await verifyPrivateToken(authz!, {
+            issuerKey: ppKey, originName: this.env.PRIVACYPASS_ORIGIN,
+          })
+          if (!tokenHash) return this.json({ error: 'invalid private token' }, 403)
+          if (await this.state.storage.get(`pptoken:${tokenHash}`)) {
+            return this.json({ error: 'token already redeemed' }, 409)
+          }
+          await this.state.storage.put(`pptoken:${tokenHash}`, Date.now())
+          await this.audit('jobs.anon-privacypass', { tokenHash })
+          return this.handleDirectJob(req, undefined)
+        }
         const ts = this.env.TURNSTILE_SECRET
         if (!ts) return this.json({ error: 'unauthorized' }, 401)
         const probe = (await req.clone().json().catch(() => null)) as
@@ -544,31 +600,41 @@ export class CoordinatorDO implements DurableObject {
       if (!body.motion) return this.json({ error: 'motion required' }, 400)
       const id = crypto.randomUUID()
       await this.state.storage.put(`committee:${id}`, {
-        motion: body.motion.slice(0, 500), at: Date.now(), yes: 0, no: 0, votes: {},
+        motion: body.motion.slice(0, 500), at: Date.now(),
+        phase: 'prevote',                       // prevote → precommit → committed|failed
+        yes: 0, no: 0, prevotes: {}, precommits: {},
       })
       return this.json({ id })
     }
     if (url.pathname === '/committee/vote' && req.method === 'POST') {
-      // Rep-weighted decision log — groundwork for the federated committee:
-      // votes only count from rep-holding volunteerIds, one vote each.
-      // Byzantine gate: the ballot must carry `sig` — a signature over
-      // `chimera-vote:<motionId>:<yes|no>` by the voter's registered DID
-      // (didbind:<id> persisted at REGISTER). Unsigned or mis-signed votes
-      // are rejected — a forged ballot is the classic Byzantine move.
+      // 2-phase BFT-lite: a motion commits only after a prevote quorum AND a
+      // precommit quorum (both ≥ JURY_QUORUM rep-weight, yes>2·no at prevote
+      // to advance, yes≥quorum at precommit to commit). A quorum of `no` in
+      // either phase fails the motion. Ballots are bound to their phase —
+      // the signed message is `chimera-vote:<id>:<phase>:<yes|no>` — so a
+      // prevote can't be replayed as a precommit. This is honest 2-phase
+      // commit *within one coordinator*; cross-deployment federation needs
+      // a shared log and is still future work.
       const body = (await req.json().catch(() => ({}))) as
-        | { id?: string; voter?: string; approve?: boolean; sig?: string } | null
+        | { id?: string; voter?: string; approve?: boolean; sig?: string; phase?: 'prevote' | 'precommit' } | null
       if (!body?.id || !body.voter) return this.json({ error: 'id + voter required' }, 400)
       const m = (await this.state.storage.get(`committee:${body.id}`)) as
-        | { yes: number; no: number; votes: Record<string, number>; motion: string; closed?: boolean } | undefined
+        | { yes: number; no: number; prevotes?: Record<string, number>; precommits?: Record<string, number>
+            votes?: Record<string, number>; motion: string; phase?: string; closed?: boolean } | undefined
       if (!m || m.closed) return this.json({ error: 'motion not found/closed' }, 404)
-      if (m.votes[body.voter] !== undefined) return this.json({ error: 'already voted' }, 409)
+      m.phase ??= 'prevote'                    // migrate pre-phase records
+      m.prevotes ??= m.votes ?? {}; m.precommits ??= {}
+      const phase = body.phase ?? 'prevote'
+      if (phase !== m.phase) return this.json({ error: `motion is in ${m.phase} phase` }, 409)
+      const ballotBox = phase === 'prevote' ? m.prevotes : m.precommits
+      if (ballotBox[body.voter] !== undefined) return this.json({ error: 'already voted this phase' }, 409)
       const rep = (await this.state.storage.get(`rep:${body.voter}`)) as { points?: number } | undefined
       const weight = rep?.points ?? 0
       if (weight <= 0) return this.json({ error: 'voter holds no rep' }, 403)
       const voterDid = (await this.state.storage.get(`didbind:${body.voter}`)) as string | undefined
       if (!voterDid) return this.json({ error: 'voter has no DID binding — register with did+sig first' }, 403)
-      if (!body.sig) return this.json({ error: 'signed ballot required: sign chimera-vote:<id>:<yes|no>' }, 400)
-      const msg = `chimera-vote:${body.id}:${body.approve ? 'yes' : 'no'}`
+      if (!body.sig) return this.json({ error: 'signed ballot required: sign chimera-vote:<id>:<phase>:<yes|no>' }, 400)
+      const msg = `chimera-vote:${body.id}:${phase}:${body.approve ? 'yes' : 'no'}`
       let ok = false
       try {
         if (voterDid.startsWith('did:key:')) {
@@ -579,17 +645,25 @@ export class CoordinatorDO implements DurableObject {
         }
       } catch { ok = false }
       if (!ok) {
-        await this.audit('committee.bad-sig', { motion: body.id, voter: body.voter })
+        await this.audit('committee.bad-sig', { motion: body.id, voter: body.voter, phase })
         return this.json({ error: 'invalid ballot signature' }, 403)
       }
-      m.votes[body.voter] = body.approve ? weight : -weight
-      if (body.approve) m.yes += weight; else m.no += weight
+      ballotBox[body.voter] = body.approve ? weight : -weight
       const quorum = Number(this.env.JURY_QUORUM || '3')
-      const totalRep = m.yes + m.no
-      if (totalRep >= quorum && m.yes > 2 * m.no) m.closed = true
+      let phaseYes = 0, phaseNo = 0
+      for (const w of Object.values(ballotBox)) { if (w > 0) phaseYes += w; else phaseNo -= w }
+      if (body.approve) m.yes = Math.max(m.yes, 0); // keep cumulative fields meaningful
+      if (phase === 'prevote' && phaseYes >= quorum && phaseYes > 2 * phaseNo) {
+        m.phase = 'precommit'
+      } else if (phaseNo >= quorum) {
+        m.phase = 'failed'; m.closed = true
+      } else if (phase === 'precommit' && phaseYes >= quorum) {
+        m.phase = 'committed'; m.closed = true
+      }
+      m.yes = phaseYes; m.no = phaseNo
       await this.state.storage.put(`committee:${body.id}`, m)
-      await this.audit('committee.vote', { motion: body.id, voter: body.voter, weight, approve: !!body.approve })
-      return this.json({ ok: true, yes: m.yes, no: m.no, closed: !!m.closed })
+      await this.audit('committee.vote', { motion: body.id, voter: body.voter, weight, approve: !!body.approve, phase })
+      return this.json({ ok: true, phase: m.phase, yes: phaseYes, no: phaseNo, closed: !!m.closed })
     }
     if (url.pathname === '/.well-known/ens' && url.searchParams.get('name')) {
       if (!this.env.ENS_RPC) return this.json({ error: 'ENS not configured' }, 501)
@@ -941,7 +1015,7 @@ export class CoordinatorDO implements DurableObject {
     // network tag is advisory.
     const volunteer = selectVolunteer(
       this.registry.values(), job.taskType, [], Date.now(),
-      job.site, job.project, job.difficulty,
+      job.site, job.project, job.difficulty, job.classification,
     )
     if (!volunteer) return false
 
@@ -1164,6 +1238,23 @@ export class CoordinatorDO implements DurableObject {
       ...(proof ? { proof } : {}),
     })
 
+    // Execution-proof hook — when PROVER_URL is configured (an opML/zkVM
+    // prover service), the job is submitted for proving: {jobId, taskType,
+    // payloadHash, resultHash, nodeDid}. The returned reference is stored
+    // on the result record and surfaces in /verify as `execProof`. Without
+    // a prover the signature proof above is attribution, not correctness —
+    // this hook is where real proofs attach.
+    if (this.env.PROVER_URL) {
+      void this.requestExecProof(jobId, job.taskType, job.payload, result, nodeDid ?? null)
+        .then((ref) => {
+          if (!ref) return
+          void this.state.storage.get(`result:${jobId}`).then((r) => {
+            if (r) void this.state.storage.put(`result:${jobId}`, { ...(r as object), execProof: ref })
+          })
+        })
+        .catch(() => void this.audit('prover.error', { jobId }))
+    }
+
     // Spot-check adjudication — a replica job (verifyOf set) is compared to
     // the original result. Only meaningful for deterministic jobs (pin CIDs);
     // a mismatch can't identify the liar with one replica, so both sides get
@@ -1239,15 +1330,26 @@ export class CoordinatorDO implements DurableObject {
       await this.state.storage.put(gkey, g)
       return
     }
+    // Rep-weighted majority — each sibling's vote weighs their accrued rep
+    // (min 1 so a zero-rep juror still counts once). A sybil cluster of
+    // fresh nodes can't outvote one high-rep juror.
     const counts = new Map<string, number>()
-    for (const r of Object.values(g.results)) counts.set(r.result, (counts.get(r.result) ?? 0) + 1)
+    for (const r of Object.values(g.results)) {
+      const rep = (await this.state.storage.get(`rep:${r.volunteerId}`)) as
+        | { points?: number } | undefined
+      const w = Math.max(1, rep?.points ?? 0)
+      counts.set(r.result, (counts.get(r.result) ?? 0) + w)
+    }
     const majority = [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0]
     for (const r of Object.values(g.results)) {
       await this.addRep(r.volunteerId, r.result === majority ? 1 : -2, 'jury')
     }
     g.verdict = majority
     await this.state.storage.put(gkey, g)
-    await this.audit('jury.verdict', { group, majority: majority.slice(0, 120), jurors: Object.keys(g.results).length })
+    await this.audit('jury.verdict', {
+      group, majority: majority.slice(0, 120), jurors: Object.keys(g.results).length,
+      weights: Object.fromEntries([...counts.entries()].map(([r, w]) => [r.slice(0, 60), w])),
+    })
     // Eval-corpus accrual — verdicts become benchmark data for the eval
     // harness (P7) to gate policy/prompt versions against.
     const corpusSeq = Number(await this.state.storage.get('corpus:seq') ?? 0) + 1
@@ -1353,7 +1455,7 @@ export class CoordinatorDO implements DurableObject {
       return this.json({ error: `payload exceeds ${maxBytes} bytes` }, 413)
     }
     if (!classificationOk(body.classification)) {
-      return this.json({ error: 'only PUBLIC classification is accepted' }, 400)
+      return this.json({ error: 'only PUBLIC/INTERNAL classifications are accepted' }, 400)
     }
     // Circuit breaker — a project whose spend breached its PROJECT_BUDGETS
     // cap refuses new work until /pools/unpause (admin) resets it.
@@ -1442,7 +1544,10 @@ export class CoordinatorDO implements DurableObject {
       source: 'direct',
       site: typeof body.site === 'string' ? body.site.slice(0, 64) : undefined,
       project,
-      classification: 'PUBLIC',
+      // INTERNAL payloads dispatch only to durable DID-bound nodes (the
+      // eligibleInternal gate in selectVolunteer) — everything else is
+      // treated PUBLIC regardless of what the submitter claimed.
+      classification: body.classification === 'INTERNAL' ? 'INTERNAL' : 'PUBLIC',
       difficulty: typeof body.difficulty === 'number' ? Math.min(Math.max(Math.round(body.difficulty), 0), 3) : undefined,
       domain: typeof body.domain === 'string' ? body.domain.slice(0, 32) : undefined,
       modelClass: typeof body.modelClass === 'string' ? body.modelClass.slice(0, 32) : undefined,
@@ -1518,7 +1623,8 @@ export class CoordinatorDO implements DurableObject {
    *  get a normal non-streamed body. */
   private async handleChatCompletions(req: Request, authProject?: string): Promise<Response> {
     const body = (await req.json().catch(() => null)) as
-      | { model?: string; messages?: { role?: string; content?: string }[]; max_tokens?: number; project?: string; stream?: boolean }
+      | { model?: string; messages?: { role?: string; content?: string }[]; max_tokens?: number
+          project?: string; stream?: boolean; classification?: string }
       | null
     if (!body?.messages?.length) {
       return this.json({ error: { message: 'messages required', type: 'invalid_request_error' } }, 400)
@@ -1532,7 +1638,9 @@ export class CoordinatorDO implements DurableObject {
         payload: JSON.stringify({ prompt }),
         taskType: PROJECT.AGENT_INFER,
         project: body.project,
-        classification: 'PUBLIC',
+        // INTERNAL callers (e.g. delta-git org-internal repos) restrict
+        // dispatch to durable+DID-bound nodes; default stays PUBLIC.
+        classification: body.classification === 'INTERNAL' ? 'INTERNAL' : 'PUBLIC',
         priority: 'interactive',
       },
       authProject,
@@ -1613,8 +1721,84 @@ export class CoordinatorDO implements DurableObject {
     }
     const value = await this.verifyX402(xpay, payee)
     if (!value) return this.json({ error: 'invalid x-payment' }, 400)
-    await this.audit('x402.payment', { payee, value })
+    // Settlement — prefer a configured facilitator (it pays gas); otherwise
+    // the coordinator wallet broadcasts the EIP-3009 transfer itself when
+    // funded. With neither, the signature is only *verified* (accounting
+    // treats it as a credit promise — honest about the distinction).
+    if (this.env.X402_FACILITATOR) {
+      const settled = await this.settleX402(xpay, payee, value)
+      if (!settled) return this.json({ error: 'x402 settlement failed' }, 402)
+      await this.audit('x402.settled', { payee, value, tx: settled })
+    } else if (this.env.COORDINATOR_PRIVATE_KEY) {
+      const tx = await this.settleX402Direct(xpay)
+      if (tx) {
+        await this.audit('x402.settled', { payee, value, tx, direct: true })
+      } else {
+        await this.audit('x402.payment', { payee, value, settled: false })
+      }
+    } else {
+      await this.audit('x402.payment', { payee, value, settled: false })
+    }
     return value
+  }
+
+  /** Direct EIP-3009 settlement — broadcast the verified authorization via
+   *  the coordinator wallet. Returns the tx hash or null (reverts on replayed
+   *  nonce / expired window — the signature was already verified upstream). */
+  private async settleX402Direct(xpay: string): Promise<string | null> {
+    try {
+      const p = JSON.parse(atob(xpay)) as {
+        payload?: { signature?: string; authorization?: {
+          from: string; to: string; value: string; validAfter: string; validBefore: string; nonce: string } }
+      }
+      const auth = p.payload?.authorization
+      const sig = p.payload?.signature
+      if (!auth || !sig) return null
+      const { wallet } = makeClients(this.env, this.rpcIdx)
+      if (!wallet) return null
+      const { r, s, v } = hexToSignature(sig as Hex)
+      const tx = await wallet.writeContract({
+        address: (this.env.X402_USDC || USDC_BASE) as Hex,
+        abi: USDC_EIP3009_ABI,
+        functionName: 'transferWithAuthorization',
+        args: [
+          auth.from as Hex, auth.to as Hex, BigInt(auth.value),
+          BigInt(auth.validAfter), BigInt(auth.validBefore), auth.nonce as Hex,
+          Number(v), r, s,
+        ],
+      })
+      return tx
+    } catch {
+      return null
+    }
+  }
+
+  /** x402 facilitator adapter — POST {x402Version, paymentHeader,
+   *  paymentRequirements} to <facilitator>/settle; returns the on-chain tx
+   *  hash or null. Compatible with the reference x402 facilitator shape. */
+  private async settleX402(xpay: string, payee: string, value: string): Promise<string | null> {
+    try {
+      const res = await fetch(`${this.env.X402_FACILITATOR!.replace(/\/$/, '')}/settle`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          x402Version: 1,
+          paymentHeader: xpay,
+          paymentRequirements: {
+            scheme: 'exact', network: 'base',
+            maxAmountRequired: value,
+            asset: this.env.X402_USDC || USDC_BASE,
+            payTo: payee,
+          },
+        }),
+        signal: AbortSignal.timeout(10_000),
+      })
+      if (!res.ok) return null
+      const j = (await res.json()) as { success?: boolean; txHash?: string; transaction?: string }
+      return j.success === false ? null : (j.txHash ?? j.transaction ?? 'settled')
+    } catch {
+      return null
+    }
   }
 
   /** Verify an x402 'exact' payment: base64 JSON carrying an EIP-3009
@@ -2028,6 +2212,29 @@ export class CoordinatorDO implements DurableObject {
 
   /** Cloudflare Turnstile siteverify — proves the submitter solved a
    *  challenge, raising the cost of bulk anonymous /jobs spam. */
+  /** Execution-prover adapter — POSTs the job's I/O hashes to PROVER_URL
+   *  (opML/zkVM-shaped: {jobId, taskType, inputHash, outputHash, nodeDid});
+   *  returns the prover's reference (proof id / tx / uri) or null on
+   *  failure. Payloads are hashed, never sent raw — the prover gets the
+   *  claim, not the content. */
+  private async requestExecProof(
+    jobId: string, taskType: number, payload: string, result: string, nodeDid: string | null,
+  ): Promise<unknown | null> {
+    const res = await fetch(`${this.env.PROVER_URL!.replace(/\/$/, '')}/prove`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        jobId, taskType,
+        inputHash: await this.sha256Hex(payload),
+        outputHash: await this.sha256Hex(result),
+        nodeDid,
+      }),
+      signal: AbortSignal.timeout(30_000),
+    })
+    if (!res.ok) return null
+    return res.json().catch(() => ({ accepted: true }))
+  }
+
   private async verifyTurnstile(token: string): Promise<boolean> {
     try {
       const res = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {

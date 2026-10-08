@@ -26,8 +26,14 @@
  *   301 BUILD_VERIFY — runs a declared command in a fresh temp dir. No
  *                      shell, argv[0] must be in BUILD_ALLOWLIST, stdout/
  *                      stderr and artifacts are size-capped and sha256'd.
+ *                      Network isolation: bwrap --unshare-net when present,
+ *                      else `unshare -Urn`, else reported 'none'.
  *                      Payload: {cmd, args?, files?:[{name,dataBase64}],
  *                      expectExit?}.
+ *   Helia/IPFS groundwork — when TRANSFORMERS_IPFS_CID is set, model weights
+ *   are fetched over IPFS (dynamic import of helia + @helia/unixfs) into a
+ *   cache dir, the tarball sha256 checked against TRANSFORMERS_IPFS_SHA256,
+ *   and transformers.js pointed at the extracted local dir.
  *
  * Env:
  *   COORDINATOR_URL    ws(s):// or http(s):// coordinator base (required)
@@ -41,7 +47,7 @@
  *   JOB_TIMEOUT_MS     per-job cap (default 120000)
  *   MAX_RESULT_BYTES   result cap (default 1 MiB)
  */
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { createHash, generateKeyPairSync, sign as edSign, createPrivateKey, createPublicKey } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, statSync, rmSync } from 'node:fs'
 import { tmpdir, hostname, cpus, totalmem } from 'node:os'
@@ -59,6 +65,9 @@ const {
   VERIFY_DISPATCH = '1',
   JOB_TIMEOUT_MS = '120000',
   MAX_RESULT_BYTES = String(1024 * 1024),
+  BUILD_NET_ISOLATION = 'auto',        // 'auto' | 'bwrap' | 'unshare' | 'none'
+  TRANSFORMERS_IPFS_CID = '',          // fetch weights over helia instead of HF
+  TRANSFORMERS_IPFS_SHA256 = '',       // required when the CID is set
 } = process.env
 
 if (!COORDINATOR_URL) {
@@ -125,7 +134,66 @@ async function verifyDispatchSig(jobId, sig) {
   } catch { return false }
 }
 
-// ── Task handlers ──
+// ── Sandbox detection (probed once at startup) ──
+
+function probeIsolation() {
+  const pref = BUILD_NET_ISOLATION
+  if (pref === 'none') return 'none'
+  // bwrap: user-namespace sandbox, unshare-net + die-with-parent.
+  if (pref === 'auto' || pref === 'bwrap') {
+    const t = spawnSync('bwrap', ['--bind', '/', '/', '--unshare-net', 'true'],
+      { stdio: 'ignore', timeout: 5000 })
+    if (!t.error && t.status === 0) return 'bwrap'
+    if (pref === 'bwrap') return 'none'
+  }
+  // unshare: user+net namespace, maps current uid to fake-root inside.
+  if (pref === 'auto' || pref === 'unshare') {
+    const t = spawnSync('unshare', ['-Urn', 'true'], { stdio: 'ignore', timeout: 5000 })
+    if (!t.error && t.status === 0) return 'unshare'
+  }
+  return 'none'
+}
+const isolation = probeIsolation()
+console.log(`[node] build-verify net isolation: ${isolation}`)
+
+/** Wrap [cmd, ...args] in the detected net-isolation sandbox. */
+function sandboxWrap(cmd, args, workdir) {
+  if (isolation === 'bwrap') {
+    // Bind the host tree, open a fresh empty netns, die with the daemon.
+    return ['bwrap', ['--bind', '/', '/', '--unshare-net', '--unshare-pid', '--die-with-parent', '--new-session', '--', cmd, ...args]]
+  }
+  if (isolation === 'unshare') {
+    return ['unshare', ['-Urn', '--kill-child', '--', cmd, ...args]]
+  }
+  return [cmd, args]
+}
+
+// ── Helia weight-shard fetch (optional — model weights over IPFS) ──
+
+async function fetchWeightsIpfs(cid, expectedSha256) {
+  let helia, unixfs
+  try {
+    helia = await import('helia')
+    unixfs = await import('@helia/unixfs')
+  } catch {
+    throw new Error('helia/@helia/unixfs not installed — npm i helia @helia/unixfs in the node env')
+  }
+  const node = await helia.createHelia()
+  try {
+    const fs = unixfs.unixfs(node)
+    const chunks = []
+    for await (const chunk of fs.cat(cid)) chunks.push(chunk)
+    const blob = Buffer.concat(chunks.map((c) => Buffer.from(c)))
+    const got = sha256Hex(blob)
+    // Weight shards are executable-adjacent — never trust unverified bytes.
+    if (expectedSha256 && got !== expectedSha256) {
+      throw new Error(`IPFS weight sha256 mismatch: got ${got}, want ${expectedSha256}`)
+    }
+    return blob
+  } finally {
+    await node.stop()
+  }
+}
 
 let inferPipeline = null
 let inferModel = null
@@ -141,6 +209,23 @@ async function runInfer(payload) {
     tf = await import('@huggingface/transformers')
   } catch {
     throw new Error('@huggingface/transformers not installed — npm i @huggingface/transformers in the node env')
+  }
+  // Optional IPFS weight fetch — TRANSFORMERS_IPFS_CID points at a tarball
+  // of the model dir; sha256-checked before it touches the runtime.
+  if (TRANSFORMERS_IPFS_CID) {
+    if (!TRANSFORMERS_IPFS_SHA256) throw new Error('TRANSFORMERS_IPFS_SHA256 required with TRANSFORMERS_IPFS_CID')
+    const cacheDir = join(tmpdir(), `weights-${TRANSFORMERS_IPFS_SHA256.slice(0, 16)}`, model)
+    if (!existsSync(join(cacheDir, 'config.json'))) {
+      const tarball = await fetchWeightsIpfs(TRANSFORMERS_IPFS_CID, TRANSFORMERS_IPFS_SHA256)
+      mkdirSync(cacheDir, { recursive: true })
+      // Extract via tar(1) — tarballs from IPFS are untrusted until hashed.
+      const ok = spawnSync('tar', ['-xzf', '/dev/stdin', '-C', cacheDir],
+        { input: tarball, stdio: ['pipe', 'ignore', 'inherit'], timeout: 120000 })
+      if (ok.error || ok.status !== 0) throw new Error('weight tarball extract failed')
+      if (!existsSync(join(cacheDir, 'config.json'))) throw new Error('extracted weights lack config.json')
+    }
+    tf.env.localModelPath = join(cacheDir, '..')
+    tf.env.allowRemoteModels = false
   }
   if (!inferPipeline || inferModel !== model) {
     inferPipeline = await tf.pipeline('text-generation', model, { dtype: 'q4' })
@@ -177,8 +262,9 @@ async function runBuildVerify(payload) {
       inHashes[name] = sha256Hex(data)
     }
 
+    const [execCmd, execArgs] = sandboxWrap(cmd, args, workdir)
     const { code, stdout, stderr } = await new Promise((resolve, reject) => {
-      const child = spawn(cmd, args, {
+      const child = spawn(execCmd, execArgs, {
         cwd: workdir,
         shell: false,
         env: { PATH: process.env.PATH, HOME: workdir, CI: '1' }, // scrubbed env — no secrets reach jobs
@@ -208,7 +294,7 @@ async function runBuildVerify(payload) {
       ok: code === expectExit, exitCode: code,
       stdoutHash: sha256Hex(stdout), stderrHash: sha256Hex(stderr),
       stdoutTail: stdout.slice(-4096), stderrTail: stderr.slice(-2048),
-      inputs: inHashes, artifacts,
+      inputs: inHashes, artifacts, isolation,
     })
   } finally {
     rmSync(workdir, { recursive: true, force: true })

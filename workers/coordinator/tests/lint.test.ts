@@ -2,12 +2,14 @@ import { describe, it, expect } from 'vitest'
 import { lintPayload, classificationOk, redactPayload, parseSealed } from '../src/lint'
 
 describe('classificationOk', () => {
-  it('accepts undefined and PUBLIC', () => {
+  it('accepts undefined, PUBLIC, and INTERNAL', () => {
     expect(classificationOk(undefined)).toBe(true)
     expect(classificationOk('PUBLIC')).toBe(true)
+    // INTERNAL is accepted — dispatch selection restricts it to
+    // durable+DID-bound nodes (see selectVolunteer's internalOnly gate).
+    expect(classificationOk('INTERNAL')).toBe(true)
   })
-  it('rejects INTERNAL/SECRET/unrecognized', () => {
-    expect(classificationOk('INTERNAL')).toBe(false)
+  it('rejects SECRET/unrecognized', () => {
     expect(classificationOk('SECRET')).toBe(false)
     expect(classificationOk('public')).toBe(false)
   })
