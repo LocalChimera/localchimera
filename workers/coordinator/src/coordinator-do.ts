@@ -1686,7 +1686,8 @@ export class CoordinatorDO implements DurableObject {
     // configured price (micro-USDC); absent table = zero-price job.
     // LANE_PREMIUMS scales the lane price for tagged domains.
     let amountWei = body.amountWei
-    if (!amountWei && this.env.PRICE_TABLE) {
+    // '0' (or absent) = unfunded — apply the lane's configured price.
+    if ((!amountWei || amountWei === '0') && this.env.PRICE_TABLE) {
       try {
         const table = JSON.parse(this.env.PRICE_TABLE) as Record<string, string>
         let price = BigInt(table[String(Number(body.taskType) || 0)] ?? '0')
@@ -1871,7 +1872,13 @@ export class CoordinatorDO implements DurableObject {
    *  (used as the job's amountWei); null = no gate; Response = 402/error. */
   private async checkPayment(req: Request, body: DirectJobBody | null): Promise<string | Response | null> {
     const payee = this.env.X402_PAYEE
-    if (!payee || body?.amountWei) return null
+    // amountWei counts as "brought payment" only when it's actually >0 —
+    // otherwise '0' would bypass both this gate and the PRICE_TABLE default.
+    let funded = false
+    if (body?.amountWei) {
+      try { funded = BigInt(body.amountWei) > 0n } catch { funded = false }
+    }
+    if (!payee || funded) return null
     const xpay = req.headers.get('x-payment')
     if (!xpay) {
       return this.json({
