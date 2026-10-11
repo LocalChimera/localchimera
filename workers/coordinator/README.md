@@ -22,6 +22,24 @@ VolunteerEscrow (Base)          CoordinatorDO                    browser volunte
 | `GET /results/:jobId` | `ADMIN_TOKEN` | stored job result (may contain consumer data) |
 | `POST /jobs` | `DISPATCH_AUTH_TOKEN` | inject a job directly (ledger-only settlement); result returns inline |
 | `POST /settle` | `ADMIN_TOKEN` | mark ledger entries paid — monthly runbook |
+| `POST /patronage` | `DISPATCH_AUTH_TOKEN` | deposit into a project pool — `fund:"award"` earmarks for the award pool |
+| `GET /poolfund/<project>` | none | award-pool accounting (deposited/spent/pending/available) |
+| `POST /award` | `DISPATCH_AUTH_TOKEN` | accepted-outcome award — `ref` idempotent, `did` or score-weighted `split`, `402` unfunded, `409` duplicate |
+| `GET /award/<ref>` | none | award record (status + recipients) |
+| `POST /award/<ref>/approve` | `ADMIN_TOKEN` | clear a pending award early (inside `AWARD_REVIEW_MS` window) |
+| `GET /awards?did=` | none | contributor award history |
+
+## Award lifecycle (Slop "pay for what merges")
+
+Accepted outcomes — delta-git verify quorums, resolved arena matches —
+POST `ref`-keyed awards that debit the project's `fund:"award"` patronage
+pool and credit payee payout ledgers. `AWARD_REVIEW_MS` optionally holds
+awards `pending` for a review window before crediting. Splits use the
+vendored Slop largest-remainder allocator
+(`src/vendor/slop/reward-allocation.ts`, MIT — `UPSTREAM.md`): integer
+micro-units, exact total, deterministic remainder order. Awards are ledger
+entries, not wires — settlement still runs the monthly on-chain runbook
+below, and nothing here moves keys or implies payment before evidence.
 
 ## Protocol notes
 

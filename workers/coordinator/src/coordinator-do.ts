@@ -20,6 +20,13 @@
  *   ledger:<volId>    → { totalWei, jobs, settledWei }
  *   ledger:site:<s>   → site host share (10%, additive)
  *   ledger:project:<p>→ project pool share (10%, additive)
+ *   poolfund:<slug>   → { depositedWei, spentWei, pendingWei } — award pool,
+ *     funded via /patronage {fund:'award'} and drawn down by /award. Kept
+ *     separate from ledger:project:* (operator share, not award money).
+ *   award:<ref>       → { ref, project, status, spendableAt, reason,
+ *     recipients: [{did, amountWei}], createdAt } — idempotent award
+ *     record; pending→credited lifecycle mirrors a review window.
+ *   awardDid:<did>:<ref> → amountWei — per-payee index for /awards?did=
  *   ref:<volId>       → { referrer, project, at } — record-only in P1
  *   lastBlock         → bigint cursor for getLogs
  * Volunteer state lives on ws attachments (hibernation-safe) + the
@@ -34,6 +41,7 @@ import { verifyMessage, verifyTypedData } from 'viem'
 import type { Hex } from 'viem'
 import { verifyDidKey, decodeSig, contentHashToCid } from './didkey'
 import { hasPrivateToken, verifyPrivateToken } from './privacypass'
+import { allocateReviewBudgetMinor } from './vendor/slop/reward-allocation'
 
 /** Base mainnet USDC — the default x402 payment asset. */
 const USDC_BASE = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'
@@ -59,6 +67,10 @@ interface Env {
   ANON_CAP_WEI?: string
   /** Dust→rep threshold at settle (default 0 = disabled) */
   MIN_PAYOUT_WEI?: string
+  /** Milliseconds an award waits as `pending` before auto-crediting —
+   *  the review window. Unset/0 = instant credit (acceptance already
+   *  happened upstream; pending is an optional second gate). */
+  AWARD_REVIEW_MS?: string
   /** Referral rep cap — jobs per referred node that earn rep (default 50) */
   REFERRAL_JOB_CAP?: string
   /** Optional webhook — rep events POSTed fire-and-forget (delta-git bridge) */
@@ -233,6 +245,27 @@ interface CommitteeMotion {
   closed?: boolean
   /** legacy field from the pre-phase implementation */
   votes?: Record<string, number>
+}
+
+/** Project award fund — micro-USDC deposits reserved for accepted-outcome
+ *  awards, distinct from ledger:project:* (the operator's host share). */
+interface PoolFund {
+  depositedWei: string
+  spentWei: string
+  pendingWei: string
+}
+
+/** One idempotent award. `pending` reserves fund availability until the
+ *  review window lapses (auto-credit) or an admin approves early —
+ *  "automation proposes; maintainers decide". */
+interface AwardRecord {
+  ref: string
+  project: string
+  status: 'pending' | 'credited'
+  reason?: string
+  recipients: { did: string; amountWei: string }[]
+  spendableAt: number | null
+  createdAt: number
 }
 
 export class CoordinatorDO implements DurableObject {
@@ -497,6 +530,51 @@ export class CoordinatorDO implements DurableObject {
       const auth = await this.jobAuth(req)
       if (!auth.ok) return this.json({ error: 'unauthorized' }, 401)
       return this.handlePatronage(req, auth.project)
+    }
+    if (url.pathname === '/award' && req.method === 'POST') {
+      // Accepted-outcome award — debits the project's award fund
+      // (poolfund:<slug>) and credits the payee's payout ledger.
+      const auth = await this.jobAuth(req)
+      if (!auth.ok) return this.json({ error: 'unauthorized' }, 401)
+      return this.handleAward(req, auth.project)
+    }
+    if (url.pathname.startsWith('/award/') && url.pathname.endsWith('/approve') && req.method === 'POST') {
+      // Admin clears a pending award early (review window not yet lapsed).
+      if (!this.bearerOk(req, this.env.ADMIN_TOKEN)) return this.json({ error: 'unauthorized' }, 401)
+      const ref = decodeURIComponent(url.pathname.slice(7, -8)).slice(0, 200)
+      return this.handleAwardApprove(ref)
+    }
+    if (url.pathname.startsWith('/award/') && req.method === 'GET') {
+      const ref = decodeURIComponent(url.pathname.slice(7)).slice(0, 200)
+      const award = (await this.state.storage.get(`award:${ref}`)) as AwardRecord | undefined
+      if (!award) return this.json({ error: 'not-found' }, 404)
+      return this.json(award)
+    }
+    if (url.pathname === '/awards' && url.searchParams.get('did')) {
+      // Contributor award/settle history — public (ledger is public).
+      const did = url.searchParams.get('did')!.slice(0, 128)
+      const rows: { ref: string; amountWei: string; status: string; project?: string; createdAt: number }[] = []
+      for (const [k, amountWei] of await this.state.storage.list({ prefix: `awardDid:${did}:`, limit: 500 })) {
+        const ref = k.slice(`awardDid:${did}:`.length)
+        const award = (await this.state.storage.get(`award:${ref}`)) as AwardRecord | undefined
+        rows.push({ ref, amountWei: String(amountWei), status: award?.status ?? 'unknown', project: award?.project, createdAt: award?.createdAt ?? 0 })
+      }
+      return this.json({ did, awards: rows })
+    }
+    if (url.pathname.startsWith('/poolfund/') && req.method === 'GET') {
+      await this.sweepPendingAwards()
+      const slug = decodeURIComponent(url.pathname.slice(10)).slice(0, 64)
+      const fund = (await this.state.storage.get(`poolfund:${slug}`)) as PoolFund | undefined
+      const deposited = BigInt(fund?.depositedWei ?? '0')
+      const spent = BigInt(fund?.spentWei ?? '0')
+      const pending = BigInt(fund?.pendingWei ?? '0')
+      return this.json({
+        project: slug,
+        depositedWei: deposited.toString(),
+        spentWei: spent.toString(),
+        pendingWei: pending.toString(),
+        availableWei: (deposited - spent - pending).toString(),
+      })
     }
     if (url.pathname === '/pools/unpause' && req.method === 'POST') {
       if (!this.bearerOk(req, this.env.ADMIN_TOKEN)) return this.json({ error: 'unauthorized' }, 401)
@@ -2137,10 +2215,11 @@ export class CoordinatorDO implements DurableObject {
   }
 
   /** Direct micro-donations → provisioned rep + ledger credit. A patronage
-   *  can target a volunteerId (tip) or a project slug (pool funding). */
+   *  can target a volunteerId (tip), a project slug (pool host-share
+   *  funding), or — with fund:"award" — the project's award fund. */
   private async handlePatronage(req: Request, authProject?: string): Promise<Response> {
     const body = (await req.json().catch(() => null)) as
-      | { volunteerId?: string; project?: string; amountWei?: string; note?: string; patron?: string }
+      | { volunteerId?: string; project?: string; amountWei?: string; note?: string; patron?: string; fund?: string }
       | null
     if (!body?.amountWei || !/^\d+$/.test(body.amountWei)) {
       return this.json({ error: 'amountWei (integer wei) required' }, 400)
@@ -2152,6 +2231,20 @@ export class CoordinatorDO implements DurableObject {
       return this.json({ error: `project token may only fund "${authProject}"` }, 403)
     }
     const amount = BigInt(body.amountWei)
+    if (body.fund === 'award' && body.project) {
+      const fkey = `poolfund:${body.project}`
+      const fund = ((await this.state.storage.get(fkey)) as PoolFund | undefined)
+        ?? { depositedWei: '0', spentWei: '0', pendingWei: '0' }
+      fund.depositedWei = (BigInt(fund.depositedWei) + amount).toString()
+      await this.state.storage.put(fkey, fund)
+      if (body.patron) {
+        await this.addRep(body.patron.slice(0, 128), Math.max(1, Math.floor(Number(amount / 1_000_000n))), 'patronage', undefined, 'provisioned')
+      }
+      await this.audit('patronage.award-fund', {
+        project: body.project, amountWei: amount.toString(), note: body.note?.slice(0, 120),
+      })
+      return this.json({ ok: true, fund: 'award' })
+    }
     if (body.volunteerId) {
       const key = `ledger:${body.volunteerId}`
       const led = ((await this.state.storage.get(key)) as
@@ -2179,6 +2272,163 @@ export class CoordinatorDO implements DurableObject {
       amountWei: amount.toString(), note: body.note?.slice(0, 120),
     })
     return this.json({ ok: true })
+  }
+
+  /** Award an accepted outcome from the project's award fund.
+   *  Body: {project, ref, reason?, did?, amountWei?,
+   *         split?: {did: string, score: number}[], amountWei?}
+   *  - single-recipient: `did` + `amountWei` (integer micro-USDC)
+   *  - split: `split` (unique dids, non-negative integer scores) +
+   *    `amountWei` — distributed by vendored largest-remainder allocation
+   *  `ref` makes the award idempotent: queue retries and vote replays hit
+   *  409 instead of double-paying. When AWARD_REVIEW_MS is configured the
+   *  award lands as `pending` (reserved but not credited) until the review
+   *  window lapses or an admin approves it. */
+  private async handleAward(req: Request, authProject?: string): Promise<Response> {
+    const body = (await req.json().catch(() => null)) as
+      | {
+          project?: string; ref?: string; reason?: string; did?: string
+          amountWei?: string; split?: { did?: string; score?: number }[]
+        }
+      | null
+    if (!body?.project || typeof body.project !== 'string' || body.project.length > 64) {
+      return this.json({ error: 'project required (<=64 chars)' }, 400)
+    }
+    if (authProject && body.project !== authProject) {
+      return this.json({ error: `project token may only award "${authProject}"` }, 403)
+    }
+    if (!body.ref || typeof body.ref !== 'string' || body.ref.length > 200) {
+      return this.json({ error: 'ref required (<=200 chars)' }, 400)
+    }
+    if (!body.amountWei || !/^\d+$/.test(body.amountWei) || BigInt(body.amountWei) <= 0n) {
+      return this.json({ error: 'amountWei (positive integer wei) required' }, 400)
+    }
+    if (await this.state.storage.get(`award:${body.ref}`)) {
+      return this.json({ error: 'ref-already-awarded' }, 409)
+    }
+    await this.sweepPendingAwards()
+    const amount = BigInt(body.amountWei)
+
+    // Resolve recipients — single did, or a score-weighted split.
+    let recipients: { did: string; amountWei: string }[]
+    if (Array.isArray(body.split) && body.split.length > 0) {
+      if (body.split.length > 64) return this.json({ error: 'split supports <=64 recipients' }, 400)
+      for (const s of body.split) {
+        if (!s.did || typeof s.did !== 'string' || s.did.length > 128 ||
+            !Number.isSafeInteger(s.score) || (s.score ?? -1) < 0) {
+          return this.json({ error: 'split entries need {did<=128c, score>=0 int}' }, 400)
+        }
+      }
+      // Vendored largest-remainder allocator — integer micro-units in,
+      // exact split out (SlopDotCash/slopdotcash, MIT).
+      const alloc = allocateReviewBudgetMinor(
+        amount,
+        body.split.map((s) => ({ actorId: s.did!, scoreThirds: s.score! })),
+      )
+      recipients = [...alloc.entries()]
+        .filter(([, amt]) => amt > 0n)
+        .map(([did, amt]) => ({ did, amountWei: amt.toString() }))
+    } else {
+      if (!body.did || typeof body.did !== 'string' || body.did.length > 128) {
+        return this.json({ error: 'did required (<=128 chars)' }, 400)
+      }
+      recipients = [{ did: body.did, amountWei: amount.toString() }]
+    }
+
+    // Fund availability — available = deposited - spent - pending.
+    const fkey = `poolfund:${body.project}`
+    const fund = ((await this.state.storage.get(fkey)) as PoolFund | undefined)
+      ?? { depositedWei: '0', spentWei: '0', pendingWei: '0' }
+    const available = BigInt(fund.depositedWei) - BigInt(fund.spentWei) - BigInt(fund.pendingWei)
+    if (available < amount) {
+      return this.json({ error: 'insufficient-pool-funds', available: available.toString() }, 402)
+    }
+
+    const reviewMs = Number(this.env.AWARD_REVIEW_MS || '0')
+    const pending = reviewMs > 0
+    const record: AwardRecord = {
+      ref: body.ref,
+      project: body.project,
+      status: pending ? 'pending' : 'credited',
+      reason: body.reason?.slice(0, 200),
+      recipients,
+      spendableAt: pending ? Date.now() + reviewMs : null,
+      createdAt: Date.now(),
+    }
+    if (pending) {
+      fund.pendingWei = (BigInt(fund.pendingWei) + amount).toString()
+      await this.state.storage.put(fkey, fund)
+    } else {
+      fund.spentWei = (BigInt(fund.spentWei) + amount).toString()
+      await this.state.storage.put(fkey, fund)
+      await this.creditAwardRecipients(recipients)
+    }
+    await this.state.storage.put(`award:${body.ref}`, record)
+    for (const r of recipients) {
+      await this.state.storage.put(`awardDid:${r.did}:${body.ref}`, r.amountWei)
+    }
+    await this.audit('award', {
+      ref: body.ref, project: body.project, status: record.status,
+      amountWei: amount.toString(), recipients: recipients.length,
+    })
+    return this.json({ ok: true, status: record.status, recipients })
+  }
+
+  /** Admin early-approval for a pending award. */
+  private async handleAwardApprove(ref: string): Promise<Response> {
+    const award = (await this.state.storage.get(`award:${ref}`)) as AwardRecord | undefined
+    if (!award) return this.json({ error: 'not-found' }, 404)
+    if (award.status === 'credited') return this.json({ ok: true, status: 'credited' })
+    await this.creditAward(award)
+    await this.audit('award.approved', { ref, project: award.project })
+    return this.json({ ok: true, status: 'credited', recipients: award.recipients })
+  }
+
+  /** Credit ledger balances for one award's recipients + flip fund
+   *  accounting from pending to spent. */
+  private async creditAward(award: AwardRecord): Promise<void> {
+    const fkey = `poolfund:${award.project}`
+    const fund = ((await this.state.storage.get(fkey)) as PoolFund | undefined)
+      ?? { depositedWei: '0', spentWei: '0', pendingWei: '0' }
+    const total = award.recipients.reduce((t, r) => t + BigInt(r.amountWei), 0n)
+    const pending = BigInt(fund.pendingWei)
+    fund.pendingWei = (pending > total ? pending - total : 0n).toString()
+    fund.spentWei = (BigInt(fund.spentWei) + total).toString()
+    await this.state.storage.put(fkey, fund)
+    await this.creditAwardRecipients(award.recipients)
+    award.status = 'credited'
+    award.spendableAt = null
+    await this.state.storage.put(`award:${award.ref}`, award)
+  }
+
+  /** Move awarded micro-USDC into each payee's payout ledger — the same
+   *  `ledger:<id>` records /settle pays out on Base. Award payees are
+   *  DID-identified principals (a contributor that never ran a node still
+   *  collects), so the anon cap does not apply — rep accrues as
+   *  `performed` labor. */
+  private async creditAwardRecipients(recipients: { did: string; amountWei: string }[]): Promise<void> {
+    for (const r of recipients) {
+      const key = `ledger:${r.did}`
+      const led = ((await this.state.storage.get(key)) as
+        | { totalWei: string; jobs: number; settledWei: string } | undefined)
+        ?? { totalWei: '0', jobs: 0, settledWei: '0' }
+      led.totalWei = (BigInt(led.totalWei) + BigInt(r.amountWei)).toString()
+      await this.state.storage.put(key, led)
+      await this.addRep(r.did, Math.max(1, Math.floor(Number(BigInt(r.amountWei) / 1_000_000n))), 'award', undefined, 'performed')
+    }
+  }
+
+  /** Lazy sweep — pending awards whose review window lapsed auto-credit.
+   *  Runs on the award/fund read paths; no alarm needed at award volume. */
+  private async sweepPendingAwards(): Promise<void> {
+    const now = Date.now()
+    for (const [key, award] of await this.state.storage.list({ prefix: 'award:', limit: 500 })) {
+      const rec = award as AwardRecord
+      if (rec?.status === 'pending' && typeof rec.spendableAt === 'number' && rec.spendableAt <= now) {
+        await this.creditAward(rec)
+        await this.audit('award.auto-credited', { ref: key.slice(6), project: rec.project })
+      }
+    }
   }
 
   private async credit(
