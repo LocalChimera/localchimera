@@ -1,0 +1,15 @@
+name = "widespread-code-router"
+main = "src/index.ts"
+compatibility_date = "2026-10-01"
+account_id = "6c0140469651854b2e358517371a03d3"
+workers_dev = false
+
+routes = [
+  { pattern = "code.widespread.fyi", custom_domain = true }
+]
+
+[vars]
+# delta-git production worker (Pressword account). The router exists
+# because custom domains require the zone to sit on the same account as
+# the worker — widespread.fyi lives here, delta-git lives there.
+UPSTREAM_ORIGIN = "https://git-on-cloudflare.delta-git.workers.dev"
